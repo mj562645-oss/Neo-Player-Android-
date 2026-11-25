@@ -12,6 +12,7 @@ import type {
   Track,
 } from '../types/music';
 import { db, StorageQuotaError, type StoredArtworkRecord } from './db';
+import NativeAudio, { isNativeAudioAvailable } from '../plugins/nativeAudio';
 
 const SUPPORTED_EXTENSIONS = new Set(['mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac', 'opus', 'webm']);
 
@@ -119,6 +120,25 @@ export async function importAudioFiles(
         playCount: 0,
       };
 
+      // Keep IndexedDB as the canonical store; create an app-private native copy for Media3.
+      // The current base64 bridge is intentionally capped to avoid large WebView memory spikes.
+      if (isNativeAudioAvailable() && file.size <= 24 * 1024 * 1024) {
+        try {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('Unable to read selected audio file'));
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.readAsDataURL(file);
+          });
+          const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+          if (base64) {
+            const nativeFile = await NativeAudio.saveAudio({ trackId, fileName: file.name, base64 });
+            track.nativeAudioUri = nativeFile.uri;
+          }
+        } catch (error) {
+          console.warn('[Neo Player] Native audio copy failed; Web Audio remains available.', error);
+        }
+      }
       await db.putTrackWithMedia(track, file, artworkRecord, lyricsDoc);
       existingSignatures.add(sig);
       importedTracks.push(track);

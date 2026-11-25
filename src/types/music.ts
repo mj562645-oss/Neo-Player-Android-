@@ -57,6 +57,8 @@ export interface Track {
   source?: 'indexeddb' | 'mediastore' | 'youtube';
   mediaStoreId?: string;
   contentUri?: string;
+  /** App-private file URI used by Android Media3 for persistent local playback. */
+  nativeAudioUri?: string;
   youtubeVideoId?: string;
 }
 
