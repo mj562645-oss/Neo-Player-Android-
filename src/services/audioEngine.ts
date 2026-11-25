@@ -1,0 +1,699 @@
+import { DEFAULT_EQUALIZER_SETTINGS, clampDb } from '../lib/equalizer';
+import { resolveMediaStorePlayableUrl } from '../plugins/mediaStore';
+import type { EqualizerSettings, Track } from '../types/music';
+import { db } from './db';
+
+export type AudioEngineEvents = {
+  timeupdate: { currentTime: number; duration: number };
+  playstate: { isPlaying: boolean };
+  ended: void;
+  error: { message: string };
+  loaded: { duration: number };
+};
+
+type Listener<K extends keyof AudioEngineEvents> = (payload: AudioEngineEvents[K]) => void;
+type DeckIndex = 0 | 1;
+
+class SharedAudioEngine {
+  private decks: [HTMLAudioElement, HTMLAudioElement];
+  private activeDeckIndex: DeckIndex = 0;
+  private deckUrls: [string | null, string | null] = [null, null];
+  private deckTrackIds: [string | null, string | null] = [null, null];
+  private deckPendingHandlers: [(() => void) | null, (() => void) | null] = [null, null];
+  private deckFadeMultipliers: [number, number] = [1, 1];
+
+  private crossfadeTimer: number | null = null;
+  private fadeOutTimer: number | null = null;
+  private fadingOutgoingIndex: DeckIndex | null = null;
+
+  private listeners: { [K in keyof AudioEngineEvents]?: Set<Listener<K>> } = {};
+  private audioCtx: AudioContext | null = null;
+  private gainNode: GainNode | null = null;
+  private deckGainNodes: [GainNode | null, GainNode | null] = [null, null];
+  private sourceNodes: [MediaElementAudioSourceNode | null, MediaElementAudioSourceNode | null] = [
+    null,
+    null,
+  ];
+  private compressorNode: DynamicsCompressorNode | null = null;
+  private bassFilter: BiquadFilterNode | null = null;
+  private midFilter: BiquadFilterNode | null = null;
+  private trebleFilter: BiquadFilterNode | null = null;
+  private normalizationEnabled = false;
+  private equalizerSettings: EqualizerSettings = { ...DEFAULT_EQUALIZER_SETTINGS };
+  private baseVolume = 0.85;
+  private isMuted = false;
+  private playbackRate = 1;
+
+  private onNextCallback?: () => void;
+  private onPrevCallback?: () => void;
+  private onSeekStepCallback?: (delta: number) => void;
+  private onPlayCallback?: () => void;
+  private onPauseCallback?: () => void;
+  private onSeekToCallback?: (seconds: number) => void;
+
+  constructor() {
+    const deckA = new Audio();
+    const deckB = new Audio();
+    deckA.preload = 'auto';
+    deckB.preload = 'auto';
+    this.decks = [deckA, deckB];
+
+    this.attachDeckEvents(0);
+    this.attachDeckEvents(1);
+    this.bindMediaSessionHandlers();
+  }
+
+  private get activeAudio(): HTMLAudioElement {
+    return this.decks[this.activeDeckIndex];
+  }
+
+  private attachDeckEvents(deckIndex: DeckIndex): void {
+    const el = this.decks[deckIndex];
+
+    el.addEventListener('timeupdate', () => {
+      if (deckIndex !== this.activeDeckIndex) return;
+      this.emit('timeupdate', {
+        currentTime: el.currentTime || 0,
+        duration: Number.isFinite(el.duration) ? el.duration : 0,
+      });
+      this.updateMediaSessionPosition();
+    });
+
+    el.addEventListener('loadedmetadata', () => {
+      if (deckIndex !== this.activeDeckIndex) return;
+      this.emit('loaded', {
+        duration: Number.isFinite(el.duration) ? el.duration : 0,
+      });
+      this.updateMediaSessionPosition();
+    });
+
+    el.addEventListener('play', () => {
+      if (deckIndex !== this.activeDeckIndex) return;
+      this.emit('playstate', { isPlaying: true });
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
+    });
+
+    el.addEventListener('pause', () => {
+      if (deckIndex !== this.activeDeckIndex) return;
+      this.emit('playstate', { isPlaying: false });
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
+    });
+
+    el.addEventListener('ended', () => {
+      if (deckIndex !== this.activeDeckIndex) {
+        // Outgoing crossfading deck naturally finished before timer ended — clean it silently
+        this.cleanupDeck(deckIndex);
+        if (this.fadingOutgoingIndex === deckIndex) {
+          this.fadingOutgoingIndex = null;
+        }
+        return;
+      }
+      this.emit('ended', undefined);
+    });
+
+    el.addEventListener('error', () => {
+      if (deckIndex !== this.activeDeckIndex) return;
+      if (!el.getAttribute('src')) return;
+      const code = el.error?.code;
+      const msg =
+        code === 4
+          ? 'This audio format is not supported by your browser.'
+          : 'Unable to play this audio file.';
+      this.emit('error', { message: msg });
+      this.emit('playstate', { isPlaying: false });
+    });
+  }
+
+  on<K extends keyof AudioEngineEvents>(event: K, fn: Listener<K>): () => void {
+    if (!this.listeners[event]) {
+      this.listeners[event] = new Set() as never;
+    }
+    const set = this.listeners[event] as Set<Listener<K>>;
+    set.add(fn);
+    return () => {
+      set.delete(fn);
+    };
+  }
+
+  private emit<K extends keyof AudioEngineEvents>(event: K, payload: AudioEngineEvents[K]): void {
+    const set = this.listeners[event] as Set<Listener<K>> | undefined;
+    if (!set) return;
+    for (const fn of set) {
+      fn(payload);
+    }
+  }
+
+  setNavigationHandlers(handlers: {
+    onNext: () => void;
+    onPrev: () => void;
+    onSeekStep: (delta: number) => void;
+    onPlay?: () => void;
+    onPause?: () => void;
+    onSeekTo?: (seconds: number) => void;
+  }): void {
+    this.onNextCallback = handlers.onNext;
+    this.onPrevCallback = handlers.onPrev;
+    this.onSeekStepCallback = handlers.onSeekStep;
+    this.onPlayCallback = handlers.onPlay;
+    this.onPauseCallback = handlers.onPause;
+    this.onSeekToCallback = handlers.onSeekTo;
+  }
+
+  private bindMediaSessionHandlers(): void {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    const safeSet = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        // Ignore unsupported actions in certain browsers
+      }
+    };
+    safeSet('play', () => {
+      if (this.onPlayCallback) this.onPlayCallback();
+      else void this.play();
+    });
+    safeSet('pause', () => {
+      if (this.onPauseCallback) this.onPauseCallback();
+      else this.pause();
+    });
+    safeSet('previoustrack', () => {
+      this.onPrevCallback?.();
+    });
+    safeSet('nexttrack', () => {
+      this.onNextCallback?.();
+    });
+    safeSet('seekto', (details) => {
+      if (typeof details.seekTime === 'number') {
+        if (this.onSeekToCallback) this.onSeekToCallback(details.seekTime);
+        else this.seek(details.seekTime);
+      }
+    });
+    safeSet('seekbackward', (details) => {
+      this.onSeekStepCallback?.(-(details.seekOffset || 15));
+    });
+    safeSet('seekforward', (details) => {
+      this.onSeekStepCallback?.(details.seekOffset || 15);
+    });
+  }
+
+  private async updateMediaSessionMetadata(track: Track): Promise<void> {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const artwork: MediaImage[] = [];
+    if (track.artworkId) {
+      const artUrl = await db.getArtworkUrl(track.artworkId);
+      if (artUrl) {
+        artwork.push({ src: artUrl, sizes: '512x512' });
+      }
+    } else if (track.artworkUrl) {
+      artwork.push({ src: track.artworkUrl, sizes: '512x512' });
+    }
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        artwork,
+      });
+    } catch {
+      // Ignore environments without MediaMetadata constructor
+    }
+  }
+
+  private updateMediaSessionPosition(): void {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    if (typeof navigator.mediaSession.setPositionState !== 'function') return;
+    const el = this.activeAudio;
+    const duration = Number.isFinite(el.duration) ? el.duration : 0;
+    if (duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: el.playbackRate || 1,
+        position: Math.min(duration, Math.max(0, el.currentTime || 0)),
+      });
+    } catch {
+      // Ignore position range errors during transitions
+    }
+  }
+
+  private ensureWebAudioGraph(): void {
+    const needsDsp =
+      this.normalizationEnabled ||
+      this.equalizerSettings.enabled ||
+      Math.abs(this.equalizerSettings.bass) > 0.01 ||
+      Math.abs(this.equalizerSettings.mid) > 0.01 ||
+      Math.abs(this.equalizerSettings.treble) > 0.01;
+
+    if (!needsDsp || this.audioCtx || typeof window === 'undefined') return;
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+
+    try {
+      this.audioCtx = new Ctx();
+
+      this.bassFilter = this.audioCtx.createBiquadFilter();
+      this.bassFilter.type = 'lowshelf';
+      this.bassFilter.frequency.value = 120;
+
+      this.midFilter = this.audioCtx.createBiquadFilter();
+      this.midFilter.type = 'peaking';
+      this.midFilter.frequency.value = 1000;
+      this.midFilter.Q.value = 1.0;
+
+      this.trebleFilter = this.audioCtx.createBiquadFilter();
+      this.trebleFilter.type = 'highshelf';
+      this.trebleFilter.frequency.value = 6500;
+
+      this.compressorNode = this.audioCtx.createDynamicsCompressor();
+      this.compressorNode.knee.value = 18;
+      this.compressorNode.attack.value = 0.005;
+      this.compressorNode.release.value = 0.2;
+
+      this.gainNode = this.audioCtx.createGain();
+
+      for (const idx of [0, 1] as const) {
+        const src = this.audioCtx.createMediaElementSource(this.decks[idx]);
+        const dGain = this.audioCtx.createGain();
+        dGain.gain.value = this.deckFadeMultipliers[idx];
+        src.connect(dGain);
+        dGain.connect(this.bassFilter);
+        this.sourceNodes[idx] = src;
+        this.deckGainNodes[idx] = dGain;
+      }
+
+      this.bassFilter.connect(this.midFilter);
+      this.midFilter.connect(this.trebleFilter);
+      this.trebleFilter.connect(this.compressorNode);
+      this.compressorNode.connect(this.gainNode);
+      this.gainNode.connect(this.audioCtx.destination);
+
+      this.applyDspParams();
+      this.applyVolumes();
+    } catch {
+      this.audioCtx = null;
+      this.gainNode = null;
+      this.deckGainNodes = [null, null];
+      this.sourceNodes = [null, null];
+      this.compressorNode = null;
+      this.bassFilter = null;
+      this.midFilter = null;
+      this.trebleFilter = null;
+    }
+  }
+
+  private applyDspParams(): void {
+    if (!this.audioCtx) return;
+    const t = this.audioCtx.currentTime;
+    const eqActive = this.equalizerSettings.enabled;
+
+    if (this.bassFilter) {
+      this.bassFilter.gain.setTargetAtTime(
+        eqActive ? clampDb(this.equalizerSettings.bass) : 0,
+        t,
+        0.015
+      );
+    }
+    if (this.midFilter) {
+      this.midFilter.gain.setTargetAtTime(
+        eqActive ? clampDb(this.equalizerSettings.mid) : 0,
+        t,
+        0.015
+      );
+    }
+    if (this.trebleFilter) {
+      this.trebleFilter.gain.setTargetAtTime(
+        eqActive ? clampDb(this.equalizerSettings.treble) : 0,
+        t,
+        0.015
+      );
+    }
+    if (this.compressorNode) {
+      this.compressorNode.threshold.setTargetAtTime(this.normalizationEnabled ? -16 : -2, t, 0.02);
+      this.compressorNode.ratio.setTargetAtTime(this.normalizationEnabled ? 4 : 1.5, t, 0.02);
+    }
+    if (this.gainNode) {
+      this.gainNode.gain.setTargetAtTime(this.normalizationEnabled ? 1.08 : 1.0, t, 0.02);
+    }
+  }
+
+  private applyVolumes(): void {
+    const master = this.isMuted ? 0 : this.baseVolume;
+    for (const idx of [0, 1] as const) {
+      const mult = Math.max(0, Math.min(1, this.deckFadeMultipliers[idx]));
+      const dGain = this.deckGainNodes[idx];
+      if (this.audioCtx && dGain) {
+        this.decks[idx].volume = master;
+        dGain.gain.setTargetAtTime(mult, this.audioCtx.currentTime, 0.012);
+      } else {
+        this.decks[idx].volume = Math.max(0, Math.min(1, master * mult));
+      }
+    }
+  }
+
+  private clearCrossfadeTimers(): void {
+    if (this.crossfadeTimer !== null) {
+      window.clearInterval(this.crossfadeTimer);
+      this.crossfadeTimer = null;
+    }
+    if (this.fadeOutTimer !== null) {
+      window.clearInterval(this.fadeOutTimer);
+      this.fadeOutTimer = null;
+    }
+  }
+
+  cancelCrossfade(cleanupOutgoing = true): void {
+    this.clearCrossfadeTimers();
+    if (cleanupOutgoing && this.fadingOutgoingIndex !== null) {
+      this.cleanupDeck(this.fadingOutgoingIndex);
+    }
+    this.fadingOutgoingIndex = null;
+    this.deckFadeMultipliers[this.activeDeckIndex] = 1;
+    this.applyVolumes();
+  }
+
+  isFadingOut(): boolean {
+    return this.fadeOutTimer !== null || this.crossfadeTimer !== null;
+  }
+
+  private cleanupDeck(deckIndex: DeckIndex): void {
+    const handler = this.deckPendingHandlers[deckIndex];
+    if (handler) {
+      this.decks[deckIndex].removeEventListener('loadedmetadata', handler);
+      this.deckPendingHandlers[deckIndex] = null;
+    }
+    const el = this.decks[deckIndex];
+    el.pause();
+    el.removeAttribute('src');
+    this.releaseDeckUrl(deckIndex);
+    this.deckTrackIds[deckIndex] = null;
+    this.deckFadeMultipliers[deckIndex] = 0;
+  }
+
+  private async resolveTrackUrl(
+    track: Track
+  ): Promise<{ srcUrl: string; objectUrl: string | null } | null> {
+    const blob = await db.getAudioBlob(track.id);
+    if (blob) {
+      const objectUrl = URL.createObjectURL(blob);
+      return { srcUrl: objectUrl, objectUrl };
+    }
+    if (track.source === 'mediastore' && track.contentUri) {
+      try {
+        const srcUrl = await resolveMediaStorePlayableUrl(track);
+        if (srcUrl) return { srcUrl, objectUrl: null };
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private attachStartPosition(deckIndex: DeckIndex, trackId: string, startPosition: number): void {
+    if (startPosition <= 0) return;
+    const el = this.decks[deckIndex];
+    const applyStartPos = () => {
+      if (
+        this.deckTrackIds[deckIndex] === trackId &&
+        Number.isFinite(el.duration) &&
+        startPosition < el.duration
+      ) {
+        el.currentTime = startPosition;
+      }
+      if (this.deckPendingHandlers[deckIndex] === applyStartPos) {
+        this.deckPendingHandlers[deckIndex] = null;
+      }
+      el.removeEventListener('loadedmetadata', applyStartPos);
+    };
+    if (el.readyState >= 1) {
+      applyStartPos();
+    } else {
+      this.deckPendingHandlers[deckIndex] = applyStartPos;
+      el.addEventListener('loadedmetadata', applyStartPos);
+    }
+  }
+
+  async loadTrack(track: Track, startPosition = 0, autoplay = true): Promise<boolean> {
+    this.cancelCrossfade(true);
+
+    const idx = this.activeDeckIndex;
+    const el = this.decks[idx];
+
+    if (this.deckPendingHandlers[idx]) {
+      el.removeEventListener('loadedmetadata', this.deckPendingHandlers[idx]!);
+      this.deckPendingHandlers[idx] = null;
+    }
+
+    if (this.deckTrackIds[idx] === track.id && el.getAttribute('src')) {
+      if (startPosition > 0 && Math.abs(el.currentTime - startPosition) > 0.5) {
+        this.seek(startPosition);
+      }
+      this.deckFadeMultipliers[idx] = 1;
+      this.applyVolumes();
+      await this.updateMediaSessionMetadata(track);
+      if (autoplay) return this.play();
+      return true;
+    }
+
+    const resolved = await this.resolveTrackUrl(track);
+    if (!resolved) {
+      this.releaseDeckUrl(idx);
+      this.deckTrackIds[idx] = null;
+      this.emit('error', { message: 'Audio file is missing from local storage.' });
+      return false;
+    }
+
+    this.releaseDeckUrl(idx);
+    this.deckUrls[idx] = resolved.objectUrl;
+    this.deckTrackIds[idx] = track.id;
+    this.deckFadeMultipliers[idx] = 1;
+
+    el.src = resolved.srcUrl;
+    el.playbackRate = this.playbackRate;
+    this.applyVolumes();
+
+    this.attachStartPosition(idx, track.id, startPosition);
+    await this.updateMediaSessionMetadata(track);
+
+    if (autoplay) {
+      return this.play();
+    }
+    return true;
+  }
+
+  async crossfadeToTrack(
+    track: Track,
+    crossfadeSeconds: number,
+    startPosition = 0
+  ): Promise<boolean> {
+    if (crossfadeSeconds <= 0.1 || !this.isPlaying()) {
+      return this.loadTrack(track, startPosition, true);
+    }
+
+    // Finalize any older fading deck before repurposing it as incoming
+    if (this.crossfadeTimer !== null || this.fadeOutTimer !== null) {
+      this.cancelCrossfade(true);
+    }
+
+    const resolved = await this.resolveTrackUrl(track);
+    if (!resolved) {
+      this.emit('error', { message: 'Audio file is missing from local storage.' });
+      return false;
+    }
+
+    const outgoingIdx: DeckIndex = this.activeDeckIndex;
+    const incomingIdx: DeckIndex = outgoingIdx === 0 ? 1 : 0;
+
+    // Clear stale resources on incoming deck while outgoing continues uninterrupted
+    this.cleanupDeck(incomingIdx);
+    this.deckUrls[incomingIdx] = resolved.objectUrl;
+    this.deckTrackIds[incomingIdx] = track.id;
+    this.deckFadeMultipliers[incomingIdx] = 0.01;
+    this.deckFadeMultipliers[outgoingIdx] = 1;
+
+    const incomingEl = this.decks[incomingIdx];
+    incomingEl.src = resolved.srcUrl;
+    incomingEl.playbackRate = this.playbackRate;
+    this.attachStartPosition(incomingIdx, track.id, startPosition);
+
+    // Switch active deck pointer immediately so UI progress/controls target the incoming track
+    this.activeDeckIndex = incomingIdx;
+    this.fadingOutgoingIndex = outgoingIdx;
+    this.applyVolumes();
+
+    try {
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        await this.audioCtx.resume();
+      }
+      await incomingEl.play();
+    } catch {
+      // Revert if play was blocked
+      this.cleanupDeck(incomingIdx);
+      this.activeDeckIndex = outgoingIdx;
+      this.fadingOutgoingIndex = null;
+      this.deckFadeMultipliers[outgoingIdx] = 1;
+      this.applyVolumes();
+      this.emit('playstate', { isPlaying: false });
+      return false;
+    }
+
+    void this.updateMediaSessionMetadata(track);
+
+    const fadeMs = Math.max(400, Math.round(crossfadeSeconds * 1000));
+    const startedAt = Date.now();
+
+    this.crossfadeTimer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(1, elapsed / fadeMs);
+
+      // Equal-power crossfade curve preserves perceived loudness
+      this.deckFadeMultipliers[outgoingIdx] = Math.cos(progress * Math.PI * 0.5);
+      this.deckFadeMultipliers[incomingIdx] = Math.sin(progress * Math.PI * 0.5);
+      this.applyVolumes();
+
+      if (progress >= 1) {
+        this.clearCrossfadeTimers();
+        this.cleanupDeck(outgoingIdx);
+        this.fadingOutgoingIndex = null;
+        this.deckFadeMultipliers[incomingIdx] = 1;
+        this.applyVolumes();
+      }
+    }, 40);
+
+    return true;
+  }
+
+  fadeOutCurrent(durationSeconds: number): void {
+    this.clearCrossfadeTimers();
+    if (!this.isPlaying() || durationSeconds <= 0.1) {
+      this.pause();
+      return;
+    }
+
+    const targetIdx = this.activeDeckIndex;
+    this.fadingOutgoingIndex = targetIdx;
+    const fadeMs = Math.max(400, Math.round(durationSeconds * 1000));
+    const startedAt = Date.now();
+
+    this.fadeOutTimer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(1, elapsed / fadeMs);
+      this.deckFadeMultipliers[targetIdx] = Math.cos(progress * Math.PI * 0.5);
+      this.applyVolumes();
+
+      if (progress >= 1) {
+        this.clearCrossfadeTimers();
+        this.cleanupDeck(targetIdx);
+        this.fadingOutgoingIndex = null;
+        this.deckFadeMultipliers[targetIdx] = 1;
+        this.applyVolumes();
+      }
+    }, 40);
+  }
+
+  async play(): Promise<boolean> {
+    const el = this.activeAudio;
+    if (!el.src) return false;
+    this.deckFadeMultipliers[this.activeDeckIndex] = 1;
+    this.applyVolumes();
+    try {
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        await this.audioCtx.resume();
+      }
+      await el.play();
+      return true;
+    } catch {
+      this.emit('playstate', { isPlaying: false });
+      return false;
+    }
+  }
+
+  pause(): void {
+    this.cancelCrossfade(true);
+    this.activeAudio.pause();
+  }
+
+  seek(seconds: number): void {
+    this.cancelCrossfade(true);
+    const el = this.activeAudio;
+    if (!el.src) return;
+    const duration = Number.isFinite(el.duration) ? el.duration : 0;
+    const target = Math.max(0, duration > 0 ? Math.min(duration, seconds) : seconds);
+    el.currentTime = target;
+    this.emit('timeupdate', { currentTime: target, duration });
+    this.updateMediaSessionPosition();
+  }
+
+  setVolume(volume: number, muted = false): void {
+    this.baseVolume = Math.max(0, Math.min(1, volume));
+    this.isMuted = muted;
+    this.applyVolumes();
+  }
+
+  setPlaybackRate(rate: number): void {
+    this.playbackRate = Math.max(0.5, Math.min(2, rate));
+    this.decks[0].playbackRate = this.playbackRate;
+    this.decks[1].playbackRate = this.playbackRate;
+    this.updateMediaSessionPosition();
+  }
+
+  setVolumeNormalization(enabled: boolean): void {
+    this.normalizationEnabled = enabled;
+    if (enabled) {
+      this.ensureWebAudioGraph();
+    }
+    this.applyDspParams();
+  }
+
+  setEqualizer(eq: EqualizerSettings): void {
+    this.equalizerSettings = { ...eq };
+    if (eq.enabled) {
+      this.ensureWebAudioGraph();
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        void this.audioCtx.resume();
+      }
+    }
+    this.applyDspParams();
+  }
+
+  getCurrentTime(): number {
+    return this.activeAudio.currentTime || 0;
+  }
+
+  getDuration(): number {
+    const el = this.activeAudio;
+    return Number.isFinite(el.duration) ? el.duration : 0;
+  }
+
+  isPlaying(): boolean {
+    const el = this.activeAudio;
+    return !el.paused && !el.ended && Boolean(el.src);
+  }
+
+  unload(): void {
+    this.clearCrossfadeTimers();
+    this.fadingOutgoingIndex = null;
+    this.cleanupDeck(0);
+    this.cleanupDeck(1);
+    this.deckFadeMultipliers = [1, 1];
+    this.applyVolumes();
+    this.emit('playstate', { isPlaying: false });
+    this.emit('timeupdate', { currentTime: 0, duration: 0 });
+  }
+
+  private releaseDeckUrl(deckIndex: DeckIndex): void {
+    const existing = this.deckUrls[deckIndex];
+    if (existing) {
+      URL.revokeObjectURL(existing);
+      this.deckUrls[deckIndex] = null;
+    }
+  }
+}
+
+export const audioEngine = new SharedAudioEngine();

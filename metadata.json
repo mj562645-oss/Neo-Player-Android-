@@ -1,0 +1,6 @@
+{
+  "name": "Neo Player",
+  "description": "Offline-first, Apple Liquid Glass music player for Android and Web.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

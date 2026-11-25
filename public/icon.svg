@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1A1B22" />
+      <stop offset="100%" stop-color="#090A0E" />
+    </linearGradient>
+    <linearGradient id="glass" x1="128" y1="96" x2="384" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96" />
+      <stop offset="100%" stop-color="#D4D8E4" stop-opacity="0.72" />
+    </linearGradient>
+    <linearGradient id="accent" x1="180" y1="130" x2="350" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF375F" />
+      <stop offset="100%" stop-color="#FF5E3A" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)" />
+  <rect x="20" y="20" width="472" height="472" rx="102" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="4" />
+  <circle cx="256" cy="256" r="142" fill="url(#accent)" fill-opacity="0.16" />
+  <path d="M330 144C330 137.373 324.627 132 318 132C316.92 132 315.845 132.146 314.805 132.433L210.805 161.123C205.605 162.558 202 167.287 202 172.681V309.5C194.23 304.739 184.996 302 175 302C146.833 302 124 323.043 124 349C124 374.957 146.833 396 175 396C203.167 396 226 374.957 226 349V222.845L306 200.776V281.5C298.23 276.739 288.996 274 279 274C250.833 274 228 295.043 228 321C228 346.957 250.833 368 279 368C307.167 368 330 346.957 330 321V144Z" fill="url(#glass)" />
+</svg>
