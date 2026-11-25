@@ -1,5 +1,3 @@
-import { Capacitor } from '@capacitor/core';
-import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
@@ -7,7 +5,6 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   setPersistence,
-  signInWithCredential,
   signInWithPopup,
   type User,
 } from 'firebase/auth';
@@ -49,6 +46,12 @@ interface GoogleIdentityOAuth2 {
   }) => GisTokenClient;
 }
 
+function isCapacitorNative(): boolean {
+  if (typeof window === 'undefined') return false;
+  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+  return Boolean(cap?.isNativePlatform?.());
+}
+
 function getGisOAuth2(): GoogleIdentityOAuth2 | null {
   if (typeof window === 'undefined') return null;
   const g = (window as unknown as { google?: { accounts?: { oauth2?: GoogleIdentityOAuth2 } } })
@@ -60,7 +63,6 @@ const GIS_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
 let gisLoadPromise: Promise<boolean> | null = null;
 
 function preloadGisClient(): Promise<boolean> {
-  if (Capacitor.isNativePlatform()) return Promise.resolve(false);
   if (typeof document === 'undefined') return Promise.resolve(false);
   if (getGisOAuth2()) return Promise.resolve(true);
   if (gisLoadPromise) return gisLoadPromise;
@@ -110,39 +112,6 @@ function setInMemoryToken(token: string, expiresInSeconds = 3500): void {
   cachedAccessToken = token;
   const ttlMs = Math.max(120, Math.min(3600, expiresInSeconds)) * 1000;
   tokenExpiresAt = Date.now() + ttlMs;
-}
-
-async function signInNativeAndroid(forceAccountPicker = false): Promise<{
-  user: User;
-  accessToken: string;
-}> {
-  if (forceAccountPicker) {
-    await FirebaseAuthentication.signOut().catch(() => {});
-  }
-
-  const nativeResult = await FirebaseAuthentication.signInWithGoogle({
-    scopes: [...YOUTUBE_SCOPES],
-  });
-
-  const idToken = nativeResult.credential?.idToken;
-  const accessToken = nativeResult.credential?.accessToken;
-
-  if (!idToken && !accessToken) {
-    throw new Error('Native Google sign-in did not return credentials.');
-  }
-
-  const credential = GoogleAuthProvider.credential(idToken, accessToken);
-  const userCredential = await signInWithCredential(auth, credential);
-
-  if (!accessToken) {
-    throw new Error('Could not obtain Google access token for YouTube.');
-  }
-
-  setInMemoryToken(accessToken, 3500);
-  return {
-    user: userCredential.user,
-    accessToken,
-  };
 }
 
 export function initYouTubeAuth(handlers: {
@@ -251,8 +220,10 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
   try {
     isSigningIn = true;
 
-    if (Capacitor.isNativePlatform()) {
-      return await signInNativeAndroid(forceAccountPicker);
+    if (isCapacitorNative()) {
+      throw new Error(
+        'Native Google Sign-In plugin is not installed yet. Add a Capacitor Google Auth plugin to continue on Android.'
+      );
     }
 
     const existingUser = auth.currentUser;
@@ -334,8 +305,5 @@ export function clearYouTubeAccessToken(): void {
 export async function signOutYouTube(): Promise<void> {
   cachedAccessToken = null;
   tokenExpiresAt = 0;
-  if (Capacitor.isNativePlatform()) {
-    await FirebaseAuthentication.signOut().catch(() => {});
-  }
   await auth.signOut();
 }
