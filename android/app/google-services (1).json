@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "622676803675",
+    "project_id": "neo-player-android-b871d",
+    "storage_bucket": "neo-player-android-b871d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:622676803675:android:79209b40530ed43a2cbf7e",
+        "android_client_info": {
+          "package_name": "com.neoplayer.music"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAFUFSDe5CkFadNN7mB-1AQmsADzqnwWHw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
