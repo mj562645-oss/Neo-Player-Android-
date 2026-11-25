@@ -30,7 +30,7 @@ jobs:
           java-version: '21'
 
       - name: Install web & Capacitor dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Build web app
         env:
