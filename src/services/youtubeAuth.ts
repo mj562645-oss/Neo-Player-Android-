@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
@@ -5,6 +7,7 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   setPersistence,
+  signInWithCredential,
   signInWithPopup,
   type User,
 } from 'firebase/auth';
@@ -57,6 +60,7 @@ const GIS_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
 let gisLoadPromise: Promise<boolean> | null = null;
 
 function preloadGisClient(): Promise<boolean> {
+  if (Capacitor.isNativePlatform()) return Promise.resolve(false);
   if (typeof document === 'undefined') return Promise.resolve(false);
   if (getGisOAuth2()) return Promise.resolve(true);
   if (gisLoadPromise) return gisLoadPromise;
@@ -94,12 +98,10 @@ function preloadGisClient(): Promise<boolean> {
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
-// Persist the signed-in Google account in Firebase across browser/app restarts
 void setPersistence(auth, browserLocalPersistence).catch(() => {
   // Fallback handled automatically by Firebase Auth
 });
 
-// Access token MUST remain strictly in memory (never localStorage or sessionStorage).
 let cachedAccessToken: string | null = null;
 let tokenExpiresAt = 0;
 let isSigningIn = false;
@@ -110,6 +112,39 @@ function setInMemoryToken(token: string, expiresInSeconds = 3500): void {
   tokenExpiresAt = Date.now() + ttlMs;
 }
 
+async function signInNativeAndroid(forceAccountPicker = false): Promise<{
+  user: User;
+  accessToken: string;
+}> {
+  if (forceAccountPicker) {
+    await FirebaseAuthentication.signOut().catch(() => {});
+  }
+
+  const nativeResult = await FirebaseAuthentication.signInWithGoogle({
+    scopes: [...YOUTUBE_SCOPES],
+  });
+
+  const idToken = nativeResult.credential?.idToken;
+  const accessToken = nativeResult.credential?.accessToken;
+
+  if (!idToken && !accessToken) {
+    throw new Error('Native Google sign-in did not return credentials.');
+  }
+
+  const credential = GoogleAuthProvider.credential(idToken, accessToken);
+  const userCredential = await signInWithCredential(auth, credential);
+
+  if (!accessToken) {
+    throw new Error('Could not obtain Google access token for YouTube.');
+  }
+
+  setInMemoryToken(accessToken, 3500);
+  return {
+    user: userCredential.user,
+    accessToken,
+  };
+}
+
 export function initYouTubeAuth(handlers: {
   onUserRestored?: (user: User, token: string | null) => void;
   onTokenObtained?: (user: User, token: string) => void;
@@ -118,8 +153,6 @@ export function initYouTubeAuth(handlers: {
 }): () => void {
   let cancelled = false;
 
-  // Passively preload Google Identity Services script so user-gesture token refresh
-  // executes synchronously on click without requesting background popups on mount.
   void preloadGisClient();
 
   const unsubscribe = onAuthStateChanged(auth, (user: User | null) => {
@@ -143,7 +176,6 @@ export function initYouTubeAuth(handlers: {
       return;
     }
 
-    // Keep Firebase Google session active across restarts without triggering background popups
     cachedAccessToken = null;
     tokenExpiresAt = 0;
     handlers.onUserRestored?.(user, null);
@@ -219,13 +251,14 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
   try {
     isSigningIn = true;
 
+    if (Capacitor.isNativePlatform()) {
+      return await signInNativeAndroid(forceAccountPicker);
+    }
+
     const existingUser = auth.currentUser;
     const oauth2 = getGisOAuth2();
     const oAuthClientId = (firebaseConfig as { oAuthClientId?: string }).oAuthClientId;
 
-    // When the user is already signed in to Firebase and simply refreshing their in-memory
-    // YouTube Music token (via Sync / Load Playlist), try GIS `prompt: 'none'` with their
-    // login hint on user gesture so Google issues a fresh token with zero permission re-prompts.
     if (!forceAccountPicker && existingUser && oauth2 && oAuthClientId) {
       try {
         const { accessToken, expiresIn } = await requestGisTokenOnGesture(
@@ -244,7 +277,6 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
         if (msg.includes('popup-closed')) {
           throw gisErr;
         }
-        // Only fall through to interactive signInWithPopup when consent/interaction is genuinely needed
       }
     }
 
@@ -260,7 +292,6 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
         include_granted_scopes: 'true',
       });
     } else if (currentEmail) {
-      // Hinted re-auth without forcing consent screen
       activeProvider.setCustomParameters({
         login_hint: currentEmail,
         include_granted_scopes: 'true',
@@ -303,5 +334,8 @@ export function clearYouTubeAccessToken(): void {
 export async function signOutYouTube(): Promise<void> {
   cachedAccessToken = null;
   tokenExpiresAt = 0;
+  if (Capacitor.isNativePlatform()) {
+    await FirebaseAuthentication.signOut().catch(() => {});
+  }
   await auth.signOut();
 }
