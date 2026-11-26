@@ -2,11 +2,14 @@ import React, { useEffect, useState } from 'react';
 import {
   Bell,
   Download,
+  ExternalLink,
   HardDrive,
+  Info,
   Loader2,
   Radio,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Sliders,
   Smartphone,
   Sparkles,
@@ -62,6 +65,7 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
     channel: ytChannel,
     isConnected: ytConnected,
     isLoggingIn: ytLoggingIn,
+    error: ytError,
     playlists: ytPlaylists,
     likedTracks: ytLikedTracks,
     signIn: ytSignIn,
@@ -178,15 +182,33 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <p className="text-xs text-[#6E6E73] dark:text-[#98989D] max-w-md">
-              Connect your Google account to browse and play your YouTube Music playlists, liked songs, and subscribed channels inside Neo Player.
-            </p>
-            <GoogleSignInButton
-              onClick={() => void ytSignIn(false)}
-              loading={ytLoggingIn}
-              label="Sign in with Google"
-            />
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <p className="text-xs text-[#6E6E73] dark:text-[#98989D] max-w-md">
+                Connect your Google account to browse and play your YouTube Music playlists, liked songs, and subscribed channels inside Neo Player.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <GoogleSignInButton
+                  onClick={() => void ytSignIn(false)}
+                  loading={ytLoggingIn}
+                  label="Sign in with Google"
+                />
+                {ytError && typeof window !== 'undefined' && window.self !== window.top && (
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 min-h-[40px] px-4 rounded-xl text-xs font-semibold liquid-glass-subtle hover:brightness-105 transition-all"
+                  >
+                    <span>Open in New Tab</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            </div>
+            {ytError && (
+              <p className="text-xs font-medium text-red-600 dark:text-red-400">{ytError}</p>
+            )}
           </div>
         )}
 
@@ -612,35 +634,49 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
           />
         )}
 
-        {hasNativeMediaStore && (
-          <div className="flex justify-end gap-2">
-            <GlassButton
-              size="sm"
-              onClick={() => {
-                void MediaStore.clearMediaCache().then((res) => {
-                  setCacheNotice(
-                    res.clearedBytes > 0
-                      ? `Cleared ${formatBytes(res.clearedBytes)} stream cache`
-                      : 'Media cache is empty'
-                  );
-                });
-              }}
-            >
-              <span>Clear Cache</span>
-            </GlassButton>
-            <GlassButton
-              size="sm"
-              variant="accent"
-              disabled={isScanningMediaStore}
-              onClick={() => void scanDeviceMediaStore()}
-            >
-              <RefreshCw
-                className={isScanningMediaStore ? 'w-3.5 h-3.5 animate-spin' : 'w-3.5 h-3.5'}
-              />
-              <span>{isScanningMediaStore ? 'Scanning...' : 'Scan MediaStore'}</span>
-            </GlassButton>
-          </div>
-        )}
+        <SettingRow
+          title="Android MediaStore Plugin"
+          description={
+            hasNativeMediaStore
+              ? 'Scan Android music folders directly via READ_MEDIA_AUDIO without duplicating audio files'
+              : 'Native plugin compiled in Android Capacitor project (com.neoplayer.music); browser builds use Select Files / Import Folder'
+          }
+          control={
+            <div className="flex items-center gap-2">
+              {hasNativeMediaStore && (
+                <GlassButton
+                  size="sm"
+                  onClick={() => {
+                    void MediaStore.clearMediaCache().then((res) => {
+                      setCacheNotice(
+                        res.clearedBytes > 0
+                          ? `Cleared ${formatBytes(res.clearedBytes)} stream cache`
+                          : 'Media cache is empty'
+                      );
+                    });
+                  }}
+                >
+                  <span>Clear Cache</span>
+                </GlassButton>
+              )}
+              <GlassButton
+                size="sm"
+                variant={hasNativeMediaStore ? 'accent' : 'glass'}
+                disabled={!hasNativeMediaStore || isScanningMediaStore}
+                onClick={() => void scanDeviceMediaStore()}
+              >
+                <RefreshCw className={isScanningMediaStore ? 'w-3.5 h-3.5 animate-spin' : 'w-3.5 h-3.5'} />
+                <span>
+                  {isScanningMediaStore
+                    ? 'Scanning...'
+                    : hasNativeMediaStore
+                      ? 'Scan MediaStore'
+                      : 'Android APK Only'}
+                </span>
+              </GlassButton>
+            </div>
+          }
+        />
 
         {cacheNotice && (
           <p className="text-xs text-[#6E6E73] dark:text-[#98989D] font-mono-tabular">
@@ -648,6 +684,28 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
           </p>
         )}
 
+        <div className="pt-2 border-t border-black/8 dark:border-white/10 text-xs text-[#6E6E73] dark:text-[#98989D] space-y-1">
+          <p>
+            Capacitor Android project configured (<span className="font-mono-tabular">com.neoplayer.music</span>) with custom <span className="font-mono-tabular">MediaStorePlugin</span>. Run <span className="font-mono-tabular">npm run android:sync</span> to build and sync into Android Studio.
+          </p>
+        </div>
+      </GlassCard>
+
+      {/* Privacy & Architecture */}
+      <GlassCard className="p-5 sm:p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-500" />
+          <h2 className="text-base font-semibold font-display">Privacy & Offline Architecture</h2>
+        </div>
+        <p className="text-sm text-[#48484A] dark:text-[#AEAEB2] leading-relaxed">
+          Neo Player operates strictly on-device. Audio files, embedded artwork, playlists, lyrics, and listening history are stored locally in IndexedDB and never transmitted to any remote server.
+        </p>
+        <div className="flex items-start gap-2.5 pt-2 border-t border-black/8 dark:border-white/10 text-xs text-[#6E6E73] dark:text-[#98989D]">
+          <Info className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>
+            Built as an installable Android PWA and Capacitor Android project with Media Session lockscreen controls, hardware back-button support, and safe-area edge-to-edge layout.
+          </p>
+        </div>
       </GlassCard>
 
       <GlassModal

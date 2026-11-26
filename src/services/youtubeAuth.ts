@@ -258,6 +258,10 @@ function requestGisTokenOnGesture(
           reject(new Error('auth/popup-closed-by-user'));
           return;
         }
+        if (err.type === 'popup_failed_to_open') {
+          reject(new Error('auth/popup-blocked'));
+          return;
+        }
         reject(new Error(err.message || err.type || 'Google token window could not open.'));
       },
     });

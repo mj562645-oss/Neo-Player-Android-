@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
+  ExternalLink,
   Heart,
   ListMusic,
   ListPlus,
@@ -166,6 +167,17 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({
                 loading={isLoggingIn}
                 label="Sign in with Google"
               />
+              {error && typeof window !== 'undefined' && window.self !== window.top && (
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 min-h-[40px] px-4 rounded-xl text-xs font-semibold liquid-glass-subtle hover:brightness-105 transition-all"
+                >
+                  <span>Open in New Tab</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full pt-3 border-t border-black/8 dark:border-white/10">

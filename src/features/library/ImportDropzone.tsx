@@ -81,7 +81,6 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
         ref={folderInputRef}
         type="file"
         multiple
-        // @ts-expect-error webkitdirectory is supported on Chromium/Android/Safari desktop
         webkitdirectory=""
         onChange={(e) => {
           void handleFiles(e.target.files);
