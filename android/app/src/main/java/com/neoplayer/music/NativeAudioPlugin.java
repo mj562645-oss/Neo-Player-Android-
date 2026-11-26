@@ -1,14 +1,20 @@
 package com.neoplayer.music;
 
+import android.Manifest;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.util.Base64;
 import com.getcapacitor.*;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import com.neoplayer.music.audio.PlaybackService;
 import java.io.*;
 
-@CapacitorPlugin(name="NativeAudio")
+@CapacitorPlugin(name="NativeAudio", permissions = {
+ @Permission(alias="notifications", strings={Manifest.permission.POST_NOTIFICATIONS})
+})
 public class NativeAudioPlugin extends Plugin {
  @PluginMethod public void saveAudio(PluginCall call){
   String data=call.getString("base64"), id=call.getString("trackId"), name=call.getString("fileName","audio.bin");
@@ -23,6 +29,16 @@ public class NativeAudioPlugin extends Plugin {
  }
  @PluginMethod public void playLocal(PluginCall call){
   String uri=call.getString("uri"); if(uri==null){call.reject("uri required");return;}
+  if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.TIRAMISU&&getPermissionState("notifications")!=PermissionState.GRANTED){
+   requestPermissionForAlias("notifications",call,"notificationPermissionCallback"); return;
+  }
+  startLocalPlayback(call,uri);
+ }
+ @PermissionCallback private void notificationPermissionCallback(PluginCall call){
+  String uri=call.getString("uri"); if(uri==null){call.reject("uri required");return;}
+  startLocalPlayback(call,uri);
+ }
+ private void startLocalPlayback(PluginCall call,String uri){
   Intent i=new Intent(getContext(),PlaybackService.class).setAction(PlaybackService.ACTION_PLAY).putExtra("uri",uri).putExtra("title",call.getString("title","Unknown title")).putExtra("artist",call.getString("artist","Unknown artist")).putExtra("positionMs",call.getLong("positionMs",0L));
   try{androidx.core.content.ContextCompat.startForegroundService(getContext(),i);call.resolve();}catch(Exception e){call.reject("Could not start playback service: "+e.getMessage(),e);}
  }

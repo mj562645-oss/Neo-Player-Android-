@@ -10,7 +10,12 @@ import React, {
 import { parseLrc } from '../lib/lrcParser';
 import { sanitizeText } from '../lib/format';
 import { createId } from '../lib/utils';
-import { MediaStore, isNativeMediaStoreAvailable } from '../plugins/mediaStore';
+import {
+  MediaStore,
+  isNativeMediaStoreAvailable,
+  writeTrackTags,
+  type ScanAudioTracksResult,
+} from '../plugins/mediaStore';
 import { db } from '../services/db';
 import {
   enrichTrackOnline,
@@ -22,6 +27,7 @@ import {
   calculateStorageBreakdown,
   deriveAlbums,
   deriveArtists,
+  importDocumentTracks,
   importAudioFiles,
   importMediaStoreTracks,
   removeTrackArtwork,
@@ -69,6 +75,7 @@ interface LibraryContextValue {
   importProgress: ImportProgress;
   enrichProgress: EnrichProgress;
   importFiles: (files: FileList | File[]) => Promise<Track[]>;
+  pickAndImportAudioFiles: () => Promise<Track[]>;
   scanDeviceMediaStore: (options?: MediaStoreScanOptions) => Promise<Track[]>;
   downloadLyricsForTrack: (
     trackId: string,
@@ -239,8 +246,11 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
               result.importedTracks
             );
           }
-        } catch {
-          // Ignore settings lookup errors
+        } catch (error) {
+          showToast(
+            error instanceof Error ? error.message : 'Unable to start automatic metadata lookup.',
+            'error'
+          );
         }
       }
 
@@ -248,6 +258,81 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     },
     [tracks, showToast]
   );
+
+  const pickAndImportAudioFiles = useCallback(async () => {
+    if (!isNativeMediaStoreAvailable()) {
+      showToast('Selecting writable audio files requires the Android app.', 'error');
+      return [];
+    }
+
+    let picked: ScanAudioTracksResult;
+    try {
+      picked = await MediaStore.pickAudioFiles();
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'Unable to open the Android audio file picker.',
+        'error'
+      );
+      return [];
+    }
+    if (picked.tracks.length === 0) return [];
+
+    setImportProgress({
+      active: true,
+      done: 0,
+      total: picked.tracks.length,
+      currentFile: picked.tracks[0].fileName,
+    });
+    const result = await importDocumentTracks(
+      picked.tracks,
+      tracksRef.current,
+      (done, total, currentFile) => {
+        setImportProgress({ active: done < total, done, total, currentFile });
+      }
+    );
+    setImportProgress({ active: false, done: 0, total: 0, currentFile: '' });
+
+    if (result.importedTracks.length > 0) {
+      setTracks((prev) =>
+        [...result.importedTracks, ...prev].sort((a, b) => b.addedAt - a.addedAt)
+      );
+      showToast(
+        `Imported ${result.importedTracks.length} writable audio file${result.importedTracks.length === 1 ? '' : 's'}`,
+        'success'
+      );
+      try {
+        const currentSettings = await db.getSettings();
+        if (currentSettings.autoEnrichOnImport) {
+          void runBatchEnrichment(
+            result.importedTracks.map((t) => t.id),
+            {
+              mode: 'missing-only',
+              fetchMetadata: true,
+              fetchCover: true,
+              fetchLyrics: true,
+            },
+            result.importedTracks
+          );
+        }
+      } catch (error) {
+        showToast(
+          error instanceof Error ? error.message : 'Unable to start automatic metadata lookup.',
+          'error'
+        );
+      }
+    }
+    if (result.quotaError) {
+      showToast(result.quotaError, 'error');
+    } else if (result.skippedFiles.length > 0 && result.importedTracks.length === 0) {
+      showToast(
+        `Skipped ${result.skippedFiles.length} file(s): ${result.skippedFiles[0].reason}`,
+        'info'
+      );
+    } else if (result.skippedFiles.length > 0) {
+      showToast(`Skipped ${result.skippedFiles.length} duplicate file(s)`, 'info');
+    }
+    return result.importedTracks;
+  }, [showToast]);
 
   const scanDeviceMediaStore = useCallback(async (options: MediaStoreScanOptions = {}) => {
     if (!isNativeMediaStoreAvailable()) {
@@ -322,8 +407,11 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
               result.importedTracks
             );
           }
-        } catch {
-          // Ignore settings lookup errors
+        } catch (error) {
+          showToast(
+            error instanceof Error ? error.message : 'Unable to start automatic metadata lookup.',
+            'error'
+          );
         }
       } else if (result.quotaError) {
         showToast(result.quotaError, 'error');
@@ -378,10 +466,31 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       >
     ) => {
       const target = tracks.find((t) => t.id === trackId);
-      if (!target) return;
+      if (!target) throw new Error('This track is no longer in the library.');
+      const canWriteEmbeddedTags =
+        isNativeMediaStoreAvailable() &&
+        Boolean(target.contentUri) &&
+        (target.source === 'document' || target.source === 'mediastore') &&
+        ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(target.format.toUpperCase());
+      if (canWriteEmbeddedTags) {
+        await writeTrackTags(target, {
+          title: patch.title ?? target.title,
+          artist: patch.artist ?? target.artist,
+          album: patch.album ?? target.album,
+          albumArtist: patch.albumArtist ?? target.albumArtist,
+          genre: patch.genre ?? target.genre,
+          year: patch.year,
+          trackNumber: patch.trackNumber,
+        });
+      }
       const updated = await updateTrackInfo(target, patch);
       setTracks((prev) => prev.map((t) => (t.id === trackId ? updated : t)));
-      showToast('Track information saved', 'success');
+      showToast(
+        canWriteEmbeddedTags
+          ? 'Track tags saved to the original file'
+          : 'Track tags saved in Neo Player only. Re-import with Pick Editable Files to update the original file.',
+        canWriteEmbeddedTags ? 'success' : 'info'
+      );
     },
     [tracks, showToast]
   );
@@ -890,6 +999,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     enrichCancelRef.current = false;
     let updatedCount = 0;
+    let failedCount = 0;
 
     setEnrichProgress({
       active: true,
@@ -929,7 +1039,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         );
         if (res.updated) updatedCount++;
       } catch {
-        // Continue to next track if one lookup fails
+        failedCount++;
       }
     }
 
@@ -947,6 +1057,12 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       );
     } else {
       showToast('No additional tags, covers, or lyrics matched online.', 'info');
+    }
+    if (failedCount > 0) {
+      showToast(
+        `Metadata lookup failed for ${failedCount} track${failedCount === 1 ? '' : 's'}. Check your connection and retry.`,
+        'error'
+      );
     }
 
     return { updatedCount };
@@ -1018,6 +1134,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         importProgress,
         enrichProgress,
         importFiles,
+        pickAndImportAudioFiles,
         scanDeviceMediaStore,
         downloadLyricsForTrack,
         enrichTrack,

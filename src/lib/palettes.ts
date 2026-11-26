@@ -33,10 +33,10 @@ export const UI_THEMES: UiThemeMeta[] = [
   {
     id: 'ios',
     name: 'iOS',
-    tagline: 'Frosted Vibrancy',
-    description: 'Apple Music inspired ultra-saturated vibrancy, crisp squircles, and hairline borders.',
+    tagline: 'Clean Native Surfaces',
+    description: 'Apple Music inspired colors, crisp controls, and simple opaque surfaces.',
     defaultPaletteId: 'ios_apple_music',
-    defaultGlassStyle: 'frosted',
+    defaultGlassStyle: 'solid',
     defaultCornerStyle: 'balanced',
     previewBgLight: 'linear-gradient(135deg, #f2f2f7 0%, #fff0f2 100%)',
     previewBgDark: 'linear-gradient(135deg, #0b0b0e 0%, #1c1c1e 100%)',
@@ -44,10 +44,10 @@ export const UI_THEMES: UiThemeMeta[] = [
   {
     id: 'material',
     name: 'Material UI',
-    tagline: 'Material You Tonal',
-    description: 'Expressive tonal surface elevation, soft pill controls, and dynamic hue washes.',
+    tagline: 'Material You',
+    description: 'Expressive tonal colors, clear surface hierarchy, and simple pill controls.',
     defaultPaletteId: 'm3_violet',
-    defaultGlassStyle: 'tinted',
+    defaultGlassStyle: 'solid',
     defaultCornerStyle: 'pillowy',
     previewBgLight: 'linear-gradient(135deg, #f6f2fa 0%, #ece4f5 100%)',
     previewBgDark: 'linear-gradient(135deg, #141218 0%, #231f2c 100%)',
@@ -55,10 +55,10 @@ export const UI_THEMES: UiThemeMeta[] = [
   {
     id: 'windows',
     name: 'Windows',
-    tagline: 'Fluent Mica & Acrylic',
-    description: 'Windows 11 Fluent Design with cool Mica backdrops, Acrylic blur, and crisp geometry.',
+    tagline: 'Fluent Surfaces',
+    description: 'Windows inspired colors, crisp geometry, and clean opaque surfaces.',
     defaultPaletteId: 'win_fluent_blue',
-    defaultGlassStyle: 'frosted',
+    defaultGlassStyle: 'solid',
     defaultCornerStyle: 'sharp',
     previewBgLight: 'linear-gradient(135deg, #f3f5f8 0%, #e6eef7 100%)',
     previewBgDark: 'linear-gradient(135deg, #1b1d21 0%, #20252d 100%)',
@@ -632,6 +632,27 @@ export function applyPersonalizationCssVars(
         '0 12px 36px -12px rgba(17, 18, 22, 0.12), 0 2px 8px -2px rgba(17, 18, 22, 0.05)'
       );
     }
+  }
+
+  if (uiTheme !== 'neo') {
+    const surfaceColors =
+      uiTheme === 'material'
+        ? resolvedTheme === 'dark'
+          ? ['#24212B', '#302C39', '#292631']
+          : ['#F5F1F8', '#FBF8FF', '#EEEAF2']
+        : uiTheme === 'windows'
+          ? resolvedTheme === 'dark'
+            ? ['#26282E', '#2C2E36', '#30323A']
+            : ['#FBFBFD', '#FFFFFF', '#F6F7FA']
+          : resolvedTheme === 'dark'
+            ? ['#1C1C1E', '#242426', '#202022']
+            : ['#FFFFFF', '#FFFFFF', '#F6F6F8'];
+    root.style.setProperty('--neo-glass-bg', surfaceColors[0]);
+    root.style.setProperty('--neo-glass-bg-elevated', surfaceColors[1]);
+    root.style.setProperty('--neo-glass-bg-subtle', surfaceColors[2]);
+    root.style.setProperty('--neo-glass-highlight', 'transparent');
+    root.style.setProperty('--neo-glass-blur', '0px');
+    root.style.setProperty('--neo-glass-saturate', '100%');
   }
 
   // Corner radii derived from UI Theme + Corner Style

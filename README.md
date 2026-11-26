@@ -30,5 +30,14 @@ the SHA-1 fingerprints for the signing keys used by your debug and release build
 
 After Android audio permission is granted, the app refreshes the device music library on launch.
 Imported tracks and library metadata are stored locally. Android MediaStore tracks use native
-Media3 playback for background audio; YouTube playback remains subject to YouTube's own background
-playback restrictions.
+Media3 playback with Android audio-focus and noisy-route handling for background audio; YouTube
+playback remains subject to YouTube's own background playback restrictions.
+On Android, use **Pick Editable Files** when importing tracks that should be editable at the file
+level. Saving tag changes for scanned MediaStore tracks asks Android for write permission. Embedded
+tag writing currently supports MP3, M4A/MP4, FLAC, OGG, and WAV files. Missing metadata, artwork,
+and lyrics are fetched for new imports by default and can be disabled in Settings. Android requests
+notification permission when native local playback starts so playback controls can appear in the
+notification shade.
+
+The iOS, Material UI, and Windows visual themes use opaque, blur-free surfaces. The Neo Player
+theme retains the customizable glass effects.

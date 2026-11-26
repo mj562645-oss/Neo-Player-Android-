@@ -42,7 +42,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   hasSeenIntro: false,
   hapticFeedback: true,
   keepScreenAwake: false,
-  autoEnrichOnImport: false,
+  autoEnrichOnImport: true,
   followedArtists: [],
   discoveryCountry: 'us',
   discoveryNotificationsEnabled: true,
@@ -343,6 +343,9 @@ class NeoDatabase {
     return {
       ...DEFAULT_USER_SETTINGS,
       ...stored,
+      autoEnrichOnImport: stored.autoEnrichPreferenceSaved
+        ? stored.autoEnrichOnImport
+        : true,
       moodCategories:
         stored.moodCategories && stored.moodCategories.length > 0
           ? stored.moodCategories

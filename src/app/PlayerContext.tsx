@@ -74,7 +74,9 @@ function isYouTubeTrack(track?: Track | null): boolean {
 function getNativePlaybackUri(track?: Track | null): string | null {
   if (!track) return null;
   if (track.nativeAudioUri) return track.nativeAudioUri;
-  if (track.source === 'mediastore' && track.contentUri) return track.contentUri;
+  if ((track.source === 'mediastore' || track.source === 'document') && track.contentUri) {
+    return track.contentUri;
+  }
   return null;
 }
 

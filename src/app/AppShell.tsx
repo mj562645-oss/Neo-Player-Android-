@@ -226,7 +226,7 @@ export const AppShell: React.FC = () => {
               src={customBgUrl}
               alt=""
               className="w-full h-full object-cover scale-105"
-              style={{ filter: `blur(${p.backgroundBlur}px)` }}
+              style={{ filter: p.uiTheme === 'neo' ? `blur(${p.backgroundBlur}px)` : undefined }}
             />
             <div
               className="absolute inset-0 bg-[var(--neo-app-bg)]"

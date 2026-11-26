@@ -17,6 +17,7 @@ import { useTheme } from '../../app/ThemeContext';
 import { useYouTube } from '../../app/YouTubeContext';
 import { formatRelativeDate, formatTime } from '../../lib/format';
 import { buildSmartPlaylistDrafts } from '../../services/smartPlaylistService';
+import { isNativeMediaStoreAvailable } from '../../plugins/mediaStore';
 import type { AppSection, LibrarySubTab, MoodCategory, Track } from '../../types/music';
 import { AlbumArtwork } from '../../components/AlbumArtwork';
 import { GoogleSignInButton } from '../../components/GoogleSignInButton';
@@ -39,8 +40,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onCreatePlaylist,
   onOpenLyricsForTrack,
 }) => {
-  const { tracks, playlists, importFiles, toggleFavourite, createPlaylist, generateSmartMixes } =
-    useLibrary();
+  const {
+    tracks,
+    playlists,
+    importFiles,
+    pickAndImportAudioFiles,
+    toggleFavourite,
+    createPlaylist,
+    generateSmartMixes,
+  } = useLibrary();
   const { trendingTracks, artistUpdates, unreadCount, playDiscoveryTrack, tuneInToTrending } =
     useDiscovery();
   const { currentTrack, isPlaying, playTrack, playNextInQueue, addToQueue, setNowPlayingOpen } =
@@ -55,6 +63,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
     loadPlaylistTracks,
   } = useYouTube();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const hasNativeMediaStore = isNativeMediaStoreAvailable();
+  const handleImportClick = () => {
+    if (hasNativeMediaStore) {
+      void pickAndImportAudioFiles();
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
 
   const smartDrafts = useMemo(
     () =>
@@ -123,7 +139,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         multiple
         accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus"
         onChange={(e) => {
-          if (e.target.files) void importFiles(e.target.files);
+          if (hasNativeMediaStore) void pickAndImportAudioFiles();
+          else if (e.target.files) void importFiles(e.target.files);
           e.target.value = '';
         }}
         className="hidden"
@@ -139,9 +156,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <GlassButton size="sm" variant="accent" onClick={() => fileInputRef.current?.click()}>
+          <GlassButton size="sm" variant="accent" onClick={handleImportClick}>
             <Upload className="w-3.5 h-3.5" />
-            <span>Import Music</span>
+            <span>{hasNativeMediaStore ? 'Pick Editable Music' : 'Import Music'}</span>
           </GlassButton>
           {tracks.length > 0 && (
             <GlassButton size="sm" onClick={() => onNavigate('library', 'songs')}>

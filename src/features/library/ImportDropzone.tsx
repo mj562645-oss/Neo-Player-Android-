@@ -15,16 +15,32 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
   compact = false,
   onImported,
 }) => {
-  const { importFiles, scanDeviceMediaStore, isScanningMediaStore, importProgress } = useLibrary();
+  const {
+    importFiles,
+    pickAndImportAudioFiles,
+    scanDeviceMediaStore,
+    isScanningMediaStore,
+    importProgress,
+  } = useLibrary();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const hasNativeMediaStore = isNativeMediaStoreAvailable();
 
   const handleFiles = async (fileList: FileList | null) => {
+    if (hasNativeMediaStore) {
+      const imported = await pickAndImportAudioFiles();
+      if (imported.length > 0) onImported?.();
+      return;
+    }
     if (!fileList || fileList.length === 0) return;
     await importFiles(fileList);
     onImported?.();
+  };
+
+  const handleAndroidPicker = async () => {
+    const imported = await pickAndImportAudioFiles();
+    if (imported.length > 0) onImported?.();
   };
 
   const handleMediaStoreScan = async () => {
@@ -100,7 +116,10 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">Import local audio</p>
               <p className="text-xs text-[#6E6E73] dark:text-[#98989D] truncate">
-                MP3, M4A, AAC, WAV, OGG, FLAC · Stored offline on your device
+                MP3, M4A, AAC, WAV, OGG, FLAC ·{' '}
+                {hasNativeMediaStore
+                  ? 'Pick files to allow embedded tag editing'
+                  : 'Stored offline in the app'}
               </p>
             </div>
           </div>
@@ -119,15 +138,21 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
             <GlassButton
               size="sm"
               variant={hasNativeMediaStore ? 'glass' : 'accent'}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() =>
+                hasNativeMediaStore
+                  ? void handleAndroidPicker()
+                  : fileInputRef.current?.click()
+              }
             >
               <Upload className="w-3.5 h-3.5" />
-              <span>Add Files</span>
+              <span>{hasNativeMediaStore ? 'Pick Editable Files' : 'Add Files'}</span>
             </GlassButton>
-            <GlassButton size="sm" onClick={() => folderInputRef.current?.click()}>
-              <FolderOpen className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Folder</span>
-            </GlassButton>
+            {!hasNativeMediaStore && (
+              <GlassButton size="sm" onClick={() => folderInputRef.current?.click()}>
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Folder</span>
+              </GlassButton>
+            )}
           </div>
         </div>
       ) : (
@@ -143,6 +168,14 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
           </p>
           <p className="text-xs text-[#8E8E93] mt-2">
             Supports MP3, M4A, AAC, WAV, OGG, and FLAC
+          </p>
+          <p className="text-xs text-[#8E8E93] mt-1">
+            Embedded tag editing supports MP3, M4A/MP4, FLAC, OGG, and WAV.
+          </p>
+          <p className="text-xs text-[#8E8E93] mt-1">
+            {hasNativeMediaStore
+              ? 'Use the Android picker to keep write access for editing the original file tags.'
+              : 'Browser imports are app copies; writing tags to the original file requires Android.'}
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
@@ -160,15 +193,21 @@ export const ImportDropzone: React.FC<ImportDropzoneProps> = ({
             <GlassButton
               size="lg"
               variant={hasNativeMediaStore ? 'glass' : 'accent'}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() =>
+                hasNativeMediaStore
+                  ? void handleAndroidPicker()
+                  : fileInputRef.current?.click()
+              }
             >
               <Upload className="w-4 h-4" />
-              <span>Select Music Files</span>
+              <span>{hasNativeMediaStore ? 'Pick Editable Music Files' : 'Select Music Files'}</span>
             </GlassButton>
-            <GlassButton size="lg" onClick={() => folderInputRef.current?.click()}>
-              <FolderOpen className="w-4 h-4" />
-              <span>Import Folder</span>
-            </GlassButton>
+            {!hasNativeMediaStore && (
+              <GlassButton size="lg" onClick={() => folderInputRef.current?.click()}>
+                <FolderOpen className="w-4 h-4" />
+                <span>Import Folder</span>
+              </GlassButton>
+            )}
           </div>
         </div>
       )}

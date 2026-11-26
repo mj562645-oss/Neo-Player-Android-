@@ -94,6 +94,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     artists,
     playlists,
     importFiles,
+    pickAndImportAudioFiles,
     scanDeviceMediaStore,
     isScanningMediaStore,
     enrichProgress,
@@ -134,6 +135,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const sortDir: SortDirection = settings.librarySortDirection ?? 'desc';
 
   const quickUploadRef = useRef<HTMLInputElement | null>(null);
+  const handleImportClick = () => {
+    if (hasNativeMediaStore) {
+      void pickAndImportAudioFiles();
+    } else {
+      quickUploadRef.current?.click();
+    }
+  };
 
   const handleSelectSortField = (field: LibrarySortField) => {
     if (field === sortField) {
@@ -559,7 +567,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         multiple
         accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus"
         onChange={(e) => {
-          if (e.target.files) void importFiles(e.target.files);
+          if (hasNativeMediaStore) void pickAndImportAudioFiles();
+          else if (e.target.files) void importFiles(e.target.files);
           e.target.value = '';
         }}
         className="hidden"
@@ -608,10 +617,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <GlassButton
             size="sm"
             variant={hasNativeMediaStore ? 'glass' : 'accent'}
-            onClick={() => quickUploadRef.current?.click()}
+            onClick={handleImportClick}
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>Import Music</span>
+            <span>{hasNativeMediaStore ? 'Pick Editable Music' : 'Import Music'}</span>
           </GlassButton>
           {(activeTab === 'songs' || activeTab === 'favourites' || activeTab === 'recent') && (
             <GlassButton

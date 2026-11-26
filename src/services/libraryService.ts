@@ -268,6 +268,65 @@ export async function importMediaStoreTracks(
   return { importedTracks, skippedFiles };
 }
 
+export async function importDocumentTracks(
+  pickedTracks: MediaStoreTrackItem[],
+  existingTracks: Track[],
+  onProgress?: (done: number, total: number, currentFileName: string) => void
+): Promise<ImportResult> {
+  const importedTracks: Track[] = [];
+  const skippedFiles: { name: string; reason: string }[] = [];
+  const existingUris = new Set(
+    existingTracks.map((track) => track.contentUri).filter((uri): uri is string => Boolean(uri))
+  );
+
+  for (let i = 0; i < pickedTracks.length; i++) {
+    const item = pickedTracks[i];
+    onProgress?.(i, pickedTracks.length, item.fileName);
+    if (existingUris.has(item.contentUri)) {
+      skippedFiles.push({ name: item.fileName, reason: 'Already in library' });
+      continue;
+    }
+
+    try {
+      const track: Track = {
+        id: createId('trk'),
+        title: sanitizeText(item.title, item.fileName),
+        artist: sanitizeText(item.artist, 'Unknown Artist'),
+        album: sanitizeText(item.album, 'Single'),
+        albumArtist: sanitizeText(item.albumArtist || item.artist, 'Unknown Artist'),
+        genre: sanitizeText(item.genre, 'Unclassified'),
+        year: item.year,
+        trackNumber: item.trackNumber,
+        duration: Number.isFinite(item.duration) ? item.duration : 0,
+        fileName: item.fileName,
+        mimeType: item.mimeType || 'audio/mpeg',
+        fileSize: item.fileSize || 0,
+        format: item.format || 'AUDIO',
+        isFavourite: false,
+        addedAt: Date.now() + i,
+        playCount: 0,
+        source: 'document',
+        contentUri: item.contentUri,
+      };
+
+      await db.putTrack(track);
+      existingUris.add(item.contentUri);
+      importedTracks.push(track);
+    } catch (err) {
+      if (err instanceof StorageQuotaError) {
+        return { importedTracks, skippedFiles, quotaError: err.message };
+      }
+      skippedFiles.push({
+        name: item.fileName,
+        reason: err instanceof Error ? err.message : 'Failed to import selected audio file',
+      });
+    }
+  }
+
+  onProgress?.(pickedTracks.length, pickedTracks.length, '');
+  return { importedTracks, skippedFiles };
+}
+
 export function deriveAlbums(tracks: Track[]): Album[] {
   const map = new Map<string, Album>();
   for (const track of tracks) {
@@ -352,8 +411,10 @@ export async function updateTrackInfo(
         ? sanitizeText(patch.albumArtist, patch.artist || track.artist)
         : track.albumArtist,
     genre: patch.genre !== undefined ? sanitizeText(patch.genre, 'Unclassified') : track.genre,
-    year: patch.year,
-    trackNumber: patch.trackNumber,
+    year: Object.prototype.hasOwnProperty.call(patch, 'year') ? patch.year : track.year,
+    trackNumber: Object.prototype.hasOwnProperty.call(patch, 'trackNumber')
+      ? patch.trackNumber
+      : track.trackNumber,
     moodTags: patch.moodTags ?? track.moodTags,
   };
   await db.putTrack(updated);

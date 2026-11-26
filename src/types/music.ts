@@ -54,7 +54,7 @@ export interface Track {
   playCount: number;
   lastPosition?: number;
   moodTags?: string[];
-  source?: 'indexeddb' | 'mediastore' | 'youtube';
+  source?: 'indexeddb' | 'mediastore' | 'document' | 'youtube';
   mediaStoreId?: string;
   contentUri?: string;
   /** App-private file URI used by Android Media3 for persistent local playback. */
@@ -190,6 +190,7 @@ export interface UserSettings {
   hapticFeedback: boolean;
   keepScreenAwake: boolean;
   autoEnrichOnImport: boolean;
+  autoEnrichPreferenceSaved?: boolean;
   followedArtists: string[];
   discoveryCountry: string;
   discoveryNotificationsEnabled: boolean;

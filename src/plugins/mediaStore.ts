@@ -56,6 +56,20 @@ export interface MediaStorePlugin {
   checkAudioPermission(): Promise<MediaStorePermissionResult>;
   requestAudioPermission(): Promise<MediaStorePermissionResult>;
   scanAudioTracks(options?: ScanAudioTracksOptions): Promise<ScanAudioTracksResult>;
+  pickAudioFiles(): Promise<ScanAudioTracksResult>;
+  writeTrackTags(options: {
+    contentUri: string;
+    source: 'mediastore' | 'document';
+    tags: {
+      title: string;
+      artist: string;
+      album: string;
+      albumArtist: string;
+      genre: string;
+      year?: number;
+      trackNumber?: number;
+    };
+  }): Promise<void>;
   resolvePlayableFile(options: ResolvePlayableFileOptions): Promise<ResolvePlayableFileResult>;
   clearMediaCache(): Promise<ClearMediaCacheResult>;
 }
@@ -64,8 +78,38 @@ export const MediaStore = registerPlugin<MediaStorePlugin>('MediaStore', {
   web: () => import('./mediaStoreWeb').then((m) => new m.MediaStoreWeb()),
 });
 
+export type EditableTrackTags = {
+  title: string;
+  artist: string;
+  album: string;
+  albumArtist: string;
+  genre: string;
+  year?: number;
+  trackNumber?: number;
+};
+
 export function isNativeMediaStoreAvailable(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+}
+
+export async function writeTrackTags(
+  track: Track,
+  tags: EditableTrackTags
+): Promise<void> {
+  if (!isNativeMediaStoreAvailable()) {
+    throw new Error('Writing embedded audio tags requires the Android app.');
+  }
+  if (
+    (track.source !== 'mediastore' && track.source !== 'document') ||
+    !track.contentUri
+  ) {
+    throw new Error('Re-import this track with the Android file picker to edit its embedded tags.');
+  }
+  await MediaStore.writeTrackTags({
+    contentUri: track.contentUri,
+    source: track.source,
+    tags,
+  });
 }
 
 export async function resolveMediaStorePlayableUrl(track: Track): Promise<string | null> {

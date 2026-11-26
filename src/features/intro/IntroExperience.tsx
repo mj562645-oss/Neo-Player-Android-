@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useLibrary } from '../../app/LibraryContext';
 import { useTheme } from '../../app/ThemeContext';
 import { triggerHaptic } from '../../services/androidPlatform';
+import { isNativeMediaStoreAvailable } from '../../plugins/mediaStore';
 import { cn } from '../../lib/utils';
 import { GlassButton } from '../../components/glass/GlassButton';
 import { ThemeSwitcher } from '../../components/ThemeSwitcher';
@@ -24,12 +25,13 @@ interface IntroExperienceProps {
 const TOTAL_STEPS = 3;
 
 export const IntroExperience: React.FC<IntroExperienceProps> = ({ open, onComplete }) => {
-  const { importFiles } = useLibrary();
+  const { importFiles, pickAndImportAudioFiles } = useLibrary();
   const { settings } = useTheme();
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
   const touchStartX = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const hasNativeMediaStore = isNativeMediaStoreAvailable();
 
   if (!open) return null;
 
@@ -50,6 +52,11 @@ export const IntroExperience: React.FC<IntroExperienceProps> = ({ open, onComple
     if (!files || files.length === 0) return;
     await importFiles(files);
     handleFinish();
+  };
+
+  const handlePickAndEnter = async () => {
+    const imported = await pickAndImportAudioFiles();
+    if (imported.length > 0) handleFinish();
   };
 
   return (
@@ -79,7 +86,8 @@ export const IntroExperience: React.FC<IntroExperienceProps> = ({ open, onComple
         multiple
         accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus"
         onChange={(e) => {
-          void handleImportAndEnter(e.target.files);
+          if (hasNativeMediaStore) void handlePickAndEnter();
+          else void handleImportAndEnter(e.target.files);
           e.target.value = '';
         }}
         className="hidden"
@@ -192,7 +200,7 @@ export const IntroExperience: React.FC<IntroExperienceProps> = ({ open, onComple
                 <IntroFeatureCard
                   icon={<Sparkles className="w-5 h-5 text-[#FF2D55]" />}
                   title="Lossless & Standard Formats"
-                  description="Plays MP3, M4A, AAC, WAV, OGG, and FLAC with automatic tag extraction and manual metadata editing."
+                  description="Plays MP3, M4A, AAC, WAV, OGG, and FLAC with automatic tag extraction. Android can also write embedded tag edits to MP3, M4A/MP4, FLAC, OGG, and WAV files."
                 />
               </div>
             </motion.div>
@@ -232,10 +240,14 @@ export const IntroExperience: React.FC<IntroExperienceProps> = ({ open, onComple
                     size="lg"
                     variant="glass"
                     className="w-full"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() =>
+                      hasNativeMediaStore
+                        ? void handlePickAndEnter()
+                        : fileInputRef.current?.click()
+                    }
                   >
                     <FolderPlus className="w-4 h-4 text-[#FF2D55]" />
-                    <span>Import Music from Device</span>
+                    <span>{hasNativeMediaStore ? 'Pick Editable Music' : 'Import Music from Device'}</span>
                   </GlassButton>
                   <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
                     You can also import songs or folders anytime from Home or Library.

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, CloudDownload, ImagePlus, Loader2, Sparkles, Trash2 } from 'lucide-react';
 import { useLibrary } from '../../app/LibraryContext';
 import { useTheme } from '../../app/ThemeContext';
+import { isNativeMediaStoreAvailable } from '../../plugins/mediaStore';
 import {
   downloadCoverBlob,
   extractSearchHints,
@@ -28,6 +29,9 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     useLibrary();
   const { settings } = useTheme();
   const artInputRef = useRef<HTMLInputElement | null>(null);
+  const trackRef = useRef(track);
+  trackRef.current = track;
+  const trackId = track?.id;
 
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
@@ -40,48 +44,81 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
 
   const [lookingUp, setLookingUp] = useState(false);
   const [downloadingLyrics, setDownloadingLyrics] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [lookupStatus, setLookupStatus] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!track) return;
-    setTitle(track.title);
-    setArtist(track.artist);
-    setAlbum(track.album);
-    setAlbumArtist(track.albumArtist);
-    setGenre(track.genre);
-    setYear(track.year ? String(track.year) : '');
-    setTrackNumber(track.trackNumber ? String(track.trackNumber) : '');
-    setMoodTags(track.moodTags || []);
+    const currentTrack = trackRef.current;
+    if (!open || !currentTrack || currentTrack.id !== trackId) return;
+    setTitle(currentTrack.title);
+    setArtist(currentTrack.artist);
+    setAlbum(currentTrack.album);
+    setAlbumArtist(currentTrack.albumArtist);
+    setGenre(currentTrack.genre);
+    setYear(currentTrack.year ? String(currentTrack.year) : '');
+    setTrackNumber(currentTrack.trackNumber ? String(currentTrack.trackNumber) : '');
+    setMoodTags(currentTrack.moodTags || []);
+    setSaveError(null);
     setLookupStatus(null);
     setCandidates([]);
     setSelectedCandidateId(null);
-  }, [track]);
+  }, [open, trackId]);
 
   if (!track) return null;
 
+  const canWriteEmbeddedTags =
+    isNativeMediaStoreAvailable() &&
+    Boolean(track.contentUri) &&
+    (track.source === 'document' || track.source === 'mediastore');
+  const tagFormatSupported = ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(
+    track.format.toUpperCase()
+  );
+  const tagWriteHint = !canWriteEmbeddedTags
+    ? 'Tags save in Neo Player; re-import with Pick Editable Files to write to the original file'
+    : tagFormatSupported
+      ? 'Saving writes tags to the original file'
+      : 'This format only supports tags saved in Neo Player';
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     const parsedYear = year.trim() ? parseInt(year, 10) : undefined;
     const parsedTrackNum = trackNumber.trim() ? parseInt(trackNumber, 10) : undefined;
-    await updateTrack(track.id, {
-      title,
-      artist,
-      album,
-      albumArtist,
-      genre,
-      year: parsedYear && parsedYear >= 1900 && parsedYear <= 2100 ? parsedYear : undefined,
-      trackNumber: parsedTrackNum && parsedTrackNum > 0 ? parsedTrackNum : undefined,
-      moodTags,
-    });
-    onOpenChange(false);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateTrack(track.id, {
+        title,
+        artist,
+        album,
+        albumArtist,
+        genre,
+        year: parsedYear && parsedYear >= 1900 && parsedYear <= 2100 ? parsedYear : undefined,
+        trackNumber: parsedTrackNum && parsedTrackNum > 0 ? parsedTrackNum : undefined,
+        moodTags,
+      });
+      onOpenChange(false);
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'Unable to write the updated audio tags.'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleArtChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    await updateTrackArtwork(track.id, file);
+    try {
+      await updateTrackArtwork(track.id, file);
+      setSaveError(null);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Unable to update album artwork.');
+    }
     e.target.value = '';
   };
 
@@ -96,15 +133,23 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     if (candidate.trackNumber) setTrackNumber(String(candidate.trackNumber));
 
     setLookupStatus('Applied tags. Checking Cover Art Archive...');
-    const coverBlob = await downloadCoverBlob(candidate);
-    if (coverBlob) {
-      const coverFile = new File([coverBlob], `${track.id}-cover.jpg`, {
-        type: coverBlob.type || 'image/jpeg',
-      });
-      await updateTrackArtwork(track.id, coverFile);
-      setLookupStatus('Tags filled and album cover downloaded. Save Changes to keep tags.');
-    } else {
-      setLookupStatus('Tags filled (no cover found in Cover Art Archive). Save Changes to keep.');
+    try {
+      const coverBlob = await downloadCoverBlob(candidate);
+      if (coverBlob) {
+        const coverFile = new File([coverBlob], `${track.id}-cover.jpg`, {
+          type: coverBlob.type || 'image/jpeg',
+        });
+        await updateTrackArtwork(track.id, coverFile);
+        setLookupStatus('Tags filled and album cover downloaded. Save Changes to keep tags.');
+      } else {
+        setLookupStatus('Tags filled (no cover found in Cover Art Archive). Save Changes to keep.');
+      }
+    } catch (error) {
+      setLookupStatus(
+        error instanceof Error
+          ? `Tags filled, but album cover could not be saved: ${error.message}`
+          : 'Tags filled, but album cover could not be saved.'
+      );
     }
   };
 
@@ -172,7 +217,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
       open={open}
       onOpenChange={onOpenChange}
       title="Edit Track Information"
-      description={`${track.fileName} · ${track.format}`}
+      description={`${track.fileName} · ${track.format} · ${tagWriteHint}`}
       className="max-w-xl"
     >
       <input
@@ -248,6 +293,11 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         {lookupStatus && (
           <p className="text-xs text-[#6E6E73] dark:text-[#98989D] liquid-glass-subtle rounded-xl px-3 py-2">
             {lookupStatus}
+          </p>
+        )}
+        {saveError && (
+          <p role="alert" className="text-xs text-red-600 dark:text-red-400 rounded-xl px-3 py-2">
+            {saveError}
           </p>
         )}
 
@@ -327,11 +377,11 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">
-          <GlassButton variant="ghost" onClick={() => onOpenChange(false)}>
+          <GlassButton variant="ghost" disabled={saving} onClick={() => onOpenChange(false)}>
             Cancel
           </GlassButton>
-          <GlassButton type="submit" variant="accent">
-            Save Changes
+          <GlassButton type="submit" variant="accent" disabled={saving}>
+            {saving ? 'Saving Tags...' : 'Save Changes'}
           </GlassButton>
         </div>
       </form>

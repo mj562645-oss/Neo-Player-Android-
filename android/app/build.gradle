@@ -34,6 +34,7 @@ dependencies {
     def media3Version = "1.11.1"
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
+    implementation "net.jthink:jaudiotagger:3.0.1"
 
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"

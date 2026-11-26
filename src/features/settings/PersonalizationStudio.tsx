@@ -665,51 +665,63 @@ export const PersonalizationStudio: React.FC = () => {
         )}
       </div>
 
-      {/* Section 3: Glass Surface, Corners, Font & Vinyl Style */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-3 border-t border-black/8 dark:border-white/10">
-        <div className="space-y-2.5">
-          <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Glass Surface Material</span>
-          </p>
-          <div className="grid grid-cols-4 gap-1.5">
-            {(['frosted', 'clear', 'tinted', 'solid'] as GlassStylePreset[]).map((style) => (
-              <button
-                key={style}
-                type="button"
-                onClick={() => void updatePersonalization({ glassStyle: style })}
-                className={cn(
-                  'min-h-[38px] rounded-xl text-xs font-medium capitalize cursor-pointer transition-colors',
-                  p.glassStyle === style
-                    ? 'text-white'
-                    : 'liquid-glass-subtle text-[#48484A] dark:text-[#AEAEB2]'
-                )}
-                style={
-                  p.glassStyle === style
-                    ? { backgroundColor: 'var(--neo-accent)' }
-                    : undefined
-                }
-              >
-                {style}
-              </button>
-            ))}
-          </div>
-          {p.glassStyle !== 'solid' && (
-            <div className="pt-1">
-              <div className="flex justify-between text-xs font-medium mb-0.5">
-                <span>Glass Blur</span>
-                <span className="font-mono-tabular">{p.glassBlur}px</span>
-              </div>
-              <Slider
-                min={12}
-                max={42}
-                step={2}
-                value={[p.glassBlur]}
-                onValueChange={(v) => void updatePersonalization({ glassBlur: v[0] ?? 28 })}
-              />
+      {/* Section 3: Surfaces, Corners, Font & Vinyl Style */}
+      <div
+        className={cn(
+          'grid grid-cols-1 gap-5 pt-3 border-t border-black/8 dark:border-white/10',
+          activeUiTheme === 'neo' && 'sm:grid-cols-2'
+        )}
+      >
+        {activeUiTheme === 'neo' ? (
+          <div className="space-y-2.5">
+            <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Glass Surface Material</span>
+            </p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(['frosted', 'clear', 'tinted', 'solid'] as GlassStylePreset[]).map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => void updatePersonalization({ glassStyle: style })}
+                  className={cn(
+                    'min-h-[38px] rounded-xl text-xs font-medium capitalize cursor-pointer transition-colors',
+                    p.glassStyle === style
+                      ? 'text-white'
+                      : 'liquid-glass-subtle text-[#48484A] dark:text-[#AEAEB2]'
+                  )}
+                  style={
+                    p.glassStyle === style
+                      ? { backgroundColor: 'var(--neo-accent)' }
+                      : undefined
+                  }
+                >
+                  {style}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
+            {p.glassStyle !== 'solid' && (
+              <div className="pt-1">
+                <div className="flex justify-between text-xs font-medium mb-0.5">
+                  <span>Glass Blur</span>
+                  <span className="font-mono-tabular">{p.glassBlur}px</span>
+                </div>
+                <Slider
+                  min={12}
+                  max={42}
+                  step={2}
+                  value={[p.glassBlur]}
+                  onValueChange={(v) => void updatePersonalization({ glassBlur: v[0] ?? 28 })}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
+            {activeThemeMeta.name} uses opaque, blur-free surfaces for a clean look and smoother
+            rendering.
+          </p>
+        )}
 
         <div className="space-y-3">
           <div className="space-y-2">

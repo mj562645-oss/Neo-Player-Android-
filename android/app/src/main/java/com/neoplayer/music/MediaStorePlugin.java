@@ -1,17 +1,25 @@
 package com.neoplayer.music;
 
+import android.app.Activity;
+import android.content.ContentValues;
 import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.Intent;
+import android.content.IntentSender;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.Size;
 
+import androidx.activity.result.ActivityResult;
+
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -21,11 +29,16 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import org.jaudiotagger.audio.AudioFile;
+import org.jaudiotagger.audio.AudioFileIO;
+import org.jaudiotagger.tag.FieldKey;
+import org.jaudiotagger.tag.Tag;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -33,6 +46,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 @CapacitorPlugin(
     name = "MediaStore",
@@ -218,6 +232,336 @@ public class MediaStorePlugin extends Plugin {
                 call.reject("Failed to scan Android MediaStore: " + ex.getMessage(), ex);
             }
         });
+    }
+
+    @PluginMethod
+    public void pickAudioFiles(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("audio/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION |
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        );
+        startActivityForResult(call, intent, "audioFilesPicked");
+    }
+
+    @ActivityCallback
+    private void audioFilesPicked(PluginCall call, ActivityResult result) {
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            JSObject empty = new JSObject();
+            empty.put("tracks", new JSArray());
+            empty.put("totalCount", 0);
+            call.resolve(empty);
+            return;
+        }
+
+        Intent resultData = result.getData();
+        int permissionFlags = resultData.getFlags() &
+            (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        List<Uri> selectedUris = new ArrayList<>();
+        if (resultData.getClipData() != null) {
+            for (int i = 0; i < resultData.getClipData().getItemCount(); i++) {
+                Uri uri = resultData.getClipData().getItemAt(i).getUri();
+                if (uri != null) selectedUris.add(uri);
+            }
+        } else if (resultData.getData() != null) {
+            selectedUris.add(resultData.getData());
+        }
+
+        getBridge().execute(() -> {
+            try {
+                ContentResolver resolver = getContext().getContentResolver();
+                JSArray tracks = new JSArray();
+                for (Uri uri : selectedUris) {
+                    resolver.takePersistableUriPermission(uri, permissionFlags);
+                    tracks.put(readPickedAudioMetadata(resolver, uri));
+                }
+                JSObject response = new JSObject();
+                response.put("tracks", tracks);
+                response.put("totalCount", tracks.length());
+                call.resolve(response);
+            } catch (Exception ex) {
+                call.reject("Unable to read the selected audio files: " + ex.getMessage(), ex);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void writeTrackTags(PluginCall call) {
+        String contentUri = call.getString("contentUri");
+        String source = call.getString("source");
+        if (contentUri == null || contentUri.isEmpty()) {
+            call.reject("Missing audio file URI.");
+            return;
+        }
+        if (!"document".equals(source) && !"mediastore".equals(source)) {
+            call.reject("This audio file was not selected with writable Android access.");
+            return;
+        }
+        if ("mediastore".equals(source)) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                call.reject("For this Android version, re-import this track with Pick Editable Files before editing tags.");
+                return;
+            }
+            try {
+                Uri uri = Uri.parse(contentUri);
+                IntentSender writeRequest = MediaStore.createWriteRequest(
+                    getContext().getContentResolver(),
+                    java.util.Collections.singletonList(uri)
+                ).getIntentSender();
+                Intent intent = new Intent(getContext(), IntentSenderActivity.class);
+                intent.putExtra(IntentSenderActivity.EXTRA_INTENT_SENDER, writeRequest);
+                startActivityForResult(call, intent, "mediaStoreWriteAccessGranted");
+                return;
+            } catch (Exception ex) {
+                call.reject("Unable to request write access for this audio file: " + ex.getMessage(), ex);
+                return;
+            }
+        }
+        writeTagsForCall(call);
+    }
+
+    @ActivityCallback
+    private void mediaStoreWriteAccessGranted(PluginCall call, ActivityResult result) {
+        if (result.getResultCode() != Activity.RESULT_OK) {
+            call.reject("Write access was not granted; the original audio file was not changed.");
+            return;
+        }
+        writeTagsForCall(call);
+    }
+
+    private void writeTagsForCall(PluginCall call) {
+        getBridge().execute(() -> {
+            File originalFile = null;
+            File editedFile = null;
+            boolean sourceWriteAttempted = false;
+            try {
+                Uri uri = Uri.parse(call.getString("contentUri"));
+                ContentResolver resolver = getContext().getContentResolver();
+                String fileName = getDisplayName(resolver, uri);
+                String extension = getExtension(fileName);
+                if (!isWritableTagFormat(extension)) {
+                    throw new IllegalArgumentException(
+                        "Embedded tag editing is not supported for ." + extension + " files."
+                    );
+                }
+
+                File tempDirectory = new File(getContext().getCacheDir(), "tag_edits");
+                if (!tempDirectory.exists() && !tempDirectory.mkdirs()) {
+                    throw new IllegalStateException("Unable to create a temporary tag-edit directory.");
+                }
+                String tempId = UUID.randomUUID().toString();
+                originalFile = new File(tempDirectory, tempId + ".original." + extension);
+                editedFile = new File(tempDirectory, tempId + ".edited." + extension);
+                try (
+                    InputStream input = resolver.openInputStream(uri);
+                    FileOutputStream output = new FileOutputStream(originalFile)
+                ) {
+                    if (input == null) throw new IllegalStateException("Unable to open the selected audio file.");
+                    byte[] buffer = new byte[32 * 1024];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                    output.getFD().sync();
+                }
+
+                copyFile(originalFile, editedFile);
+                AudioFile audioFile = AudioFileIO.read(editedFile);
+                Tag tag = audioFile.getTagOrCreateAndSetDefault();
+                JSObject tags = call.getObject("tags");
+                if (tags == null) throw new IllegalArgumentException("Missing edited tag values.");
+                setTagField(tag, FieldKey.TITLE, jsonString(tags, "title"));
+                setTagField(tag, FieldKey.ARTIST, jsonString(tags, "artist"));
+                setTagField(tag, FieldKey.ALBUM, jsonString(tags, "album"));
+                setTagField(tag, FieldKey.ALBUM_ARTIST, jsonString(tags, "albumArtist"));
+                setTagField(tag, FieldKey.GENRE, jsonString(tags, "genre"));
+                setTagField(tag, FieldKey.YEAR, jsonString(tags, "year"));
+                setTagField(tag, FieldKey.TRACK, jsonString(tags, "trackNumber"));
+                audioFile.commit();
+
+                sourceWriteAttempted = true;
+                writeFileToUri(resolver, uri, editedFile);
+                if ("mediastore".equals(call.getString("source"))) {
+                    updateMediaStoreMetadata(resolver, uri, tags);
+                }
+                sourceWriteAttempted = false;
+                call.resolve();
+            } catch (Exception ex) {
+                if (sourceWriteAttempted && originalFile != null && originalFile.exists()) {
+                    try {
+                        writeFileToUri(
+                            getContext().getContentResolver(),
+                            Uri.parse(call.getString("contentUri")),
+                            originalFile
+                        );
+                    } catch (Exception restoreException) {
+                        ex.addSuppressed(restoreException);
+                    }
+                }
+                call.reject("Failed to write tags to the original audio file: " + ex.getMessage(), ex);
+            } finally {
+                if (originalFile != null && originalFile.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    originalFile.delete();
+                }
+                if (editedFile != null && editedFile.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    editedFile.delete();
+                }
+            }
+        });
+    }
+
+    private static void copyFile(File source, File destination) throws Exception {
+        try (
+            InputStream input = new java.io.FileInputStream(source);
+            FileOutputStream output = new FileOutputStream(destination)
+        ) {
+            byte[] buffer = new byte[32 * 1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            output.getFD().sync();
+        }
+    }
+
+    private static void writeFileToUri(ContentResolver resolver, Uri uri, File source) throws Exception {
+        try (
+            InputStream input = new java.io.FileInputStream(source);
+            OutputStream output = resolver.openOutputStream(uri, "rwt")
+        ) {
+            if (output == null) throw new IllegalStateException("Unable to write the selected audio file.");
+            byte[] buffer = new byte[32 * 1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            output.flush();
+        }
+    }
+
+    private JSObject readPickedAudioMetadata(ContentResolver resolver, Uri uri) throws Exception {
+        String fileName = getDisplayName(resolver, uri);
+        String mimeType = resolver.getType(uri);
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(getContext(), uri);
+            String title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
+            String artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
+            String album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM);
+            String albumArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST);
+            String genre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE);
+            String yearValue = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR);
+            String trackValue = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER);
+            String durationValue = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+
+            JSObject item = new JSObject();
+            item.put("id", uri.toString());
+            item.put("contentUri", uri.toString());
+            item.put("title", normalizeUnknown(title, stripExtension(fileName)));
+            item.put("artist", normalizeUnknown(artist, "Unknown Artist"));
+            item.put("album", normalizeUnknown(album, "Single"));
+            item.put("albumArtist", normalizeUnknown(albumArtist, normalizeUnknown(artist, "Unknown Artist")));
+            item.put("genre", normalizeUnknown(genre, "Unclassified"));
+            int year = parseLeadingNumber(yearValue);
+            if (year > 1900) item.put("year", year);
+            int trackNumber = parseLeadingNumber(trackValue);
+            if (trackNumber > 0) item.put("trackNumber", trackNumber);
+            item.put("duration", parseLeadingNumber(durationValue) / 1000.0);
+            item.put("fileName", fileName);
+            item.put("mimeType", mimeType == null ? "audio/mpeg" : mimeType);
+            item.put("fileSize", getFileSize(resolver, uri));
+            item.put("format", detectFormat(fileName, mimeType));
+            item.put("addedAt", System.currentTimeMillis());
+            return item;
+        } finally {
+            retriever.release();
+        }
+    }
+
+    private static String getDisplayName(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor = resolver.query(
+            uri,
+            new String[] { OpenableColumns.DISPLAY_NAME },
+            null,
+            null,
+            null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameColumn >= 0) {
+                    String name = cursor.getString(nameColumn);
+                    if (name != null && !name.trim().isEmpty()) return name;
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall back to the URI path if the document provider omits display metadata.
+        }
+        String segment = uri.getLastPathSegment();
+        return segment == null || segment.trim().isEmpty() ? "audio.mp3" : segment;
+    }
+
+    private static long getFileSize(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor = resolver.query(
+            uri,
+            new String[] { OpenableColumns.SIZE },
+            null,
+            null,
+            null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) return cursor.getLong(sizeColumn);
+            }
+        } catch (Exception ignored) {
+            // The picker provider may not expose a file size.
+        }
+        return 0L;
+    }
+
+    private static int parseLeadingNumber(String value) {
+        if (value == null) return 0;
+        String leadingNumber = value.trim().split("[/\\\\]", 2)[0].replaceAll("[^0-9].*$", "");
+        try {
+            return Integer.parseInt(leadingNumber);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
+    private static boolean isWritableTagFormat(String extension) {
+        String ext = extension.toLowerCase(Locale.ROOT);
+        return "mp3".equals(ext) || "m4a".equals(ext) || "mp4".equals(ext) ||
+            "flac".equals(ext) || "ogg".equals(ext) || "wav".equals(ext);
+    }
+
+    private static void setTagField(Tag tag, FieldKey key, String value) throws Exception {
+        if (value == null || value.trim().isEmpty()) {
+            tag.deleteField(key);
+        } else {
+            tag.setField(key, value.trim());
+        }
+    }
+
+    private static String jsonString(JSObject object, String key) {
+        Object value = object.opt(key);
+        return value == null ? null : value.toString();
+    }
+
+    private static void updateMediaStoreMetadata(ContentResolver resolver, Uri uri, JSObject tags) {
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Audio.Media.TITLE, jsonString(tags, "title"));
+        values.put(MediaStore.Audio.Media.ARTIST, jsonString(tags, "artist"));
+        values.put(MediaStore.Audio.Media.ALBUM, jsonString(tags, "album"));
+        String year = jsonString(tags, "year");
+        String trackNumber = jsonString(tags, "trackNumber");
+        if (year == null || year.trim().isEmpty()) values.putNull(MediaStore.Audio.Media.YEAR);
+        else values.put(MediaStore.Audio.Media.YEAR, parseLeadingNumber(year));
+        if (trackNumber == null || trackNumber.trim().isEmpty()) values.putNull(MediaStore.Audio.Media.TRACK);
+        else values.put(MediaStore.Audio.Media.TRACK, parseLeadingNumber(trackNumber));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            values.put(MediaStore.Audio.AudioColumns.ALBUM_ARTIST, jsonString(tags, "albumArtist"));
+        }
+        resolver.update(uri, values, null, null);
     }
 
     @PluginMethod

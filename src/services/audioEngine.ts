@@ -404,7 +404,7 @@ class SharedAudioEngine {
       const objectUrl = URL.createObjectURL(blob);
       return { srcUrl: objectUrl, objectUrl };
     }
-    if (track.source === 'mediastore' && track.contentUri) {
+    if ((track.source === 'mediastore' || track.source === 'document') && track.contentUri) {
       try {
         const srcUrl = await resolveMediaStorePlayableUrl(track);
         if (srcUrl) return { srcUrl, objectUrl: null };

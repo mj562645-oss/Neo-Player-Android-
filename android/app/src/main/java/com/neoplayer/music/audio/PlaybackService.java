@@ -3,6 +3,8 @@ package com.neoplayer.music.audio;
 import android.content.Intent;
 import android.net.Uri;
 import androidx.annotation.Nullable;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.Player;
@@ -23,7 +25,14 @@ public class PlaybackService extends MediaSessionService {
     private ExoPlayer player;
     private MediaSession session;
     @Override public void onCreate(){ super.onCreate();
-        player=new ExoPlayer.Builder(this).build(); activePlayer=player;
+        player=new ExoPlayer.Builder(this).build();
+        AudioAttributes audioAttributes=new AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build();
+        player.setAudioAttributes(audioAttributes,true);
+        player.setHandleAudioBecomingNoisy(true);
+        activePlayer=player;
         player.addListener(new Player.Listener(){
             @Override public void onIsPlayingChanged(boolean value){ playing=value; }
             @Override public void onPlaybackStateChanged(int state){ durationMs=Math.max(0,player.getDuration()); }

@@ -507,7 +507,12 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
             control={
               <Switch
                 checked={settings.autoEnrichOnImport}
-                onCheckedChange={(checked) => void updateSettings({ autoEnrichOnImport: checked })}
+                onCheckedChange={(checked) =>
+                  void updateSettings({
+                    autoEnrichOnImport: checked,
+                    autoEnrichPreferenceSaved: true,
+                  })
+                }
                 aria-label="Auto-fetch missing metadata and lyrics on import"
               />
             }
