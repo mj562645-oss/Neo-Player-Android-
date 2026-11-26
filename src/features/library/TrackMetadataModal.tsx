@@ -441,19 +441,27 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <Field label="Track Title" value={title} onChange={setTitle} required />
-          <Field label="Artist" value={artist} onChange={setArtist} required />
-          <Field label="Album" value={album} onChange={setAlbum} />
-          <Field label="Album Artist" value={albumArtist} onChange={setAlbumArtist} />
-          <Field label="Genre" value={genre} onChange={setGenre} />
+          <Field label="Track Title" value={title} onChange={setTitle} required disabled={saving} />
+          <Field label="Artist" value={artist} onChange={setArtist} required disabled={saving} />
+          <Field label="Album" value={album} onChange={setAlbum} disabled={saving} />
+          <Field label="Album Artist" value={albumArtist} onChange={setAlbumArtist} disabled={saving} />
+          <Field label="Genre" value={genre} onChange={setGenre} disabled={saving} />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Year" value={year} onChange={setYear} type="number" placeholder="2026" />
+            <Field
+              label="Year"
+              value={year}
+              onChange={setYear}
+              type="number"
+              placeholder="2026"
+              disabled={saving}
+            />
             <Field
               label="Track #"
               value={trackNumber}
               onChange={setTrackNumber}
               type="number"
               placeholder="1"
+              disabled={saving}
             />
           </div>
         </div>
@@ -469,6 +477,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
                 <button
                   key={mood.id}
                   type="button"
+                  disabled={saving}
                   onClick={() => toggleMood(mood.id)}
                   className={`min-h-[34px] px-3 rounded-xl text-xs font-medium transition-colors cursor-pointer border ${
                     active
@@ -507,6 +516,7 @@ interface FieldProps {
   type?: string;
   required?: boolean;
   placeholder?: string;
+  disabled?: boolean;
 }
 
 const Field: React.FC<FieldProps> = ({
@@ -516,6 +526,7 @@ const Field: React.FC<FieldProps> = ({
   type = 'text',
   required = false,
   placeholder,
+  disabled = false,
 }) => (
   <label className="block">
     <span className="block text-xs font-medium text-[#6E6E73] dark:text-[#98989D] mb-1">
@@ -526,6 +537,7 @@ const Field: React.FC<FieldProps> = ({
       value={value}
       required={required}
       placeholder={placeholder}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       className="w-full min-h-[42px] px-3.5 rounded-xl liquid-glass-subtle text-sm text-[#111216] dark:text-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[var(--neo-accent)]"
     />
