@@ -92,7 +92,7 @@ export default defineConfig(() => {
           if (id.includes('vite/dist/client/client')) {
             let next = code.replace(
               /const transport = normalizeModuleRunnerTransport\(\(\(\) => \{[\s\S]*?\}\)\(\)\);/,
-              'const transport = normalizeModuleRunnerTransport({ async disconnect() {}, send() {} });'
+              'const transport = normalizeModuleRunnerTransport({ async disconnect() {}, connect() {}, send() {} });'
             );
             next = next.replace(
               'transport.connect(createHMRHandler(handleMessage))',
