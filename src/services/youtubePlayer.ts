@@ -1,310 +1,150 @@
-import { getApp, getApps, initializeApp } from 'firebase/app';
-import {
-  browserLocalPersistence,
-  getAuth,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  setPersistence,
-  signInWithPopup,
-  type User,
-} from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+export type YouTubePlayerState =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'paused'
+  | 'ended'
+  | 'error';
 
-export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.readonly'] as const;
+export type YouTubePlayerEvent =
+  | 'stateChange'
+  | 'timeUpdate'
+  | 'durationChange'
+  | 'error';
 
-interface GisTokenResponse {
-  access_token?: string;
-  expires_in?: number | string;
-  scope?: string;
-  error?: string;
-  error_description?: string;
+export type YouTubePlayerListener<T = unknown> = (payload: T) => void;
+
+export interface YouTubePlayerLoadOptions {
+  videoId: string;
+  startSeconds?: number;
+  autoplay?: boolean;
 }
 
-interface GisErrorResponse {
-  type?: string;
-  message?: string;
-}
+class YouTubePlayerService {
+  private state: YouTubePlayerState = 'idle';
+  private currentVideoId: string | null = null;
+  private currentTime = 0;
+  private duration = 0;
+  private volume = 100;
+  private muted = false;
+  private listeners: Map<YouTubePlayerEvent, Set<YouTubePlayerListener<any>>> = new Map();
 
-interface GisTokenClient {
-  requestAccessToken: (overrideConfig?: {
-    prompt?: string;
-    hint?: string;
-    scope?: string;
-    include_granted_scopes?: boolean;
-  }) => void;
-}
-
-interface GoogleIdentityOAuth2 {
-  initTokenClient: (config: {
-    client_id: string;
-    scope: string;
-    prompt?: string;
-    hint?: string;
-    include_granted_scopes?: boolean;
-    callback: (response: GisTokenResponse) => void;
-    error_callback?: (error: GisErrorResponse) => void;
-  }) => GisTokenClient;
-}
-
-function isCapacitorNative(): boolean {
-  if (typeof window === 'undefined') return false;
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  return Boolean(cap?.isNativePlatform?.());
-}
-
-function getGisOAuth2(): GoogleIdentityOAuth2 | null {
-  if (typeof window === 'undefined') return null;
-  const g = (window as unknown as { google?: { accounts?: { oauth2?: GoogleIdentityOAuth2 } } })
-    .google;
-  return g?.accounts?.oauth2 || null;
-}
-
-const GIS_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
-let gisLoadPromise: Promise<boolean> | null = null;
-
-function preloadGisClient(): Promise<boolean> {
-  if (isCapacitorNative()) return Promise.resolve(false);
-  if (typeof document === 'undefined') return Promise.resolve(false);
-  if (getGisOAuth2()) return Promise.resolve(true);
-  if (gisLoadPromise) return gisLoadPromise;
-
-  gisLoadPromise = new Promise<boolean>((resolve) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${GIS_SCRIPT_SRC}"]`
-    );
-    if (existing) {
-      if (getGisOAuth2()) {
-        resolve(true);
-        return;
-      }
-      existing.addEventListener('load', () => resolve(Boolean(getGisOAuth2())), { once: true });
-      existing.addEventListener('error', () => resolve(false), { once: true });
-      window.setTimeout(() => resolve(Boolean(getGisOAuth2())), 4000);
-      return;
+  public on<T = unknown>(event: YouTubePlayerEvent, listener: YouTubePlayerListener<T>): () => void {
+    let set = this.listeners.get(event);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(event, set);
     }
+    set.add(listener);
+    return () => this.off(event, listener);
+  }
 
-    const script = document.createElement('script');
-    script.src = GIS_SCRIPT_SRC;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(Boolean(getGisOAuth2()));
-    script.onerror = () => {
-      gisLoadPromise = null;
-      resolve(false);
-    };
-    document.head.appendChild(script);
-  });
+  public off<T = unknown>(event: YouTubePlayerEvent, listener: YouTubePlayerListener<T>): void {
+    this.listeners.get(event)?.delete(listener);
+  }
 
-  return gisLoadPromise;
-}
-
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
-
-void setPersistence(auth, browserLocalPersistence).catch(() => {
-  // Fallback handled automatically by Firebase Auth
-});
-
-let cachedAccessToken: string | null = null;
-let tokenExpiresAt = 0;
-let isSigningIn = false;
-
-function setInMemoryToken(token: string, expiresInSeconds = 3500): void {
-  cachedAccessToken = token;
-  const ttlMs = Math.max(120, Math.min(3600, expiresInSeconds)) * 1000;
-  tokenExpiresAt = Date.now() + ttlMs;
-}
-
-export function initYouTubeAuth(handlers: {
-  onUserRestored?: (user: User, token: string | null) => void;
-  onTokenObtained?: (user: User, token: string) => void;
-  onTokenUnavailable?: (user: User) => void;
-  onSignedOut?: () => void;
-}): () => void {
-  let cancelled = false;
-
-  void preloadGisClient();
-
-  const unsubscribe = onAuthStateChanged(auth, (user: User | null) => {
-    if (cancelled) return;
-
-    if (!user) {
-      cachedAccessToken = null;
-      tokenExpiresAt = 0;
-      handlers.onSignedOut?.();
-      return;
-    }
-
-    if (cachedAccessToken && Date.now() < tokenExpiresAt - 30_000) {
-      handlers.onUserRestored?.(user, cachedAccessToken);
-      handlers.onTokenObtained?.(user, cachedAccessToken);
-      return;
-    }
-
-    if (isSigningIn) {
-      handlers.onUserRestored?.(user, cachedAccessToken);
-      return;
-    }
-
-    cachedAccessToken = null;
-    tokenExpiresAt = 0;
-    handlers.onUserRestored?.(user, null);
-    handlers.onTokenUnavailable?.(user);
-  });
-
-  return () => {
-    cancelled = true;
-    unsubscribe();
-  };
-}
-
-function requestGisTokenOnGesture(
-  oauth2: GoogleIdentityOAuth2,
-  clientId: string,
-  hintEmail?: string,
-  promptMode: '' | 'none' = 'none'
-): Promise<{ accessToken: string; expiresIn: number }> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = window.setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error('Google token refresh timed out.'));
-    }, 30_000);
-
-    const client = oauth2.initTokenClient({
-      client_id: clientId,
-      scope: YOUTUBE_SCOPES.join(' '),
-      prompt: promptMode,
-      hint: hintEmail,
-      include_granted_scopes: true,
-      callback: (resp) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeoutId);
-        if (resp.error || !resp.access_token) {
-          reject(
-            new Error(resp.error_description || resp.error || 'Could not refresh YouTube token.')
-          );
-          return;
-        }
-        const expiresIn =
-          typeof resp.expires_in === 'number'
-            ? resp.expires_in
-            : parseInt(String(resp.expires_in || '3500'), 10) || 3500;
-        resolve({ accessToken: resp.access_token, expiresIn });
-      },
-      error_callback: (err) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeoutId);
-        if (err.type === 'popup_closed') {
-          reject(new Error('auth/popup-closed-by-user'));
-          return;
-        }
-        reject(new Error(err.message || err.type || 'Google token window could not open.'));
-      },
-    });
-
-    client.requestAccessToken({
-      prompt: promptMode,
-      hint: hintEmail,
-      include_granted_scopes: true,
-    });
-  });
-}
-
-export async function signInWithYouTube(forceAccountPicker = false): Promise<{
-  user: User;
-  accessToken: string;
-}> {
-  try {
-    isSigningIn = true;
-
-    if (isCapacitorNative()) {
-      throw new Error(
-        'Google sign-in on Android requires a native Capacitor auth plugin rather than web browser popups.'
-      );
-    }
-
-    const existingUser = auth.currentUser;
-    const oauth2 = getGisOAuth2();
-    const oAuthClientId = (firebaseConfig as { oAuthClientId?: string }).oAuthClientId;
-
-    if (!forceAccountPicker && existingUser && oauth2 && oAuthClientId) {
+  private emit<T = unknown>(event: YouTubePlayerEvent, payload: T): void {
+    this.listeners.get(event)?.forEach((fn) => {
       try {
-        const { accessToken, expiresIn } = await requestGisTokenOnGesture(
-          oauth2,
-          oAuthClientId,
-          existingUser.email || undefined,
-          'none'
-        );
-        setInMemoryToken(accessToken, expiresIn);
-        return {
-          user: existingUser,
-          accessToken,
-        };
-      } catch (gisErr) {
-        const msg = gisErr instanceof Error ? gisErr.message.toLowerCase() : '';
-        if (msg.includes('popup-closed')) {
-          throw gisErr;
-        }
+        fn(payload);
+      } catch {
+        // Ignore listener errors so playback flow continues
       }
-    }
+    });
+  }
 
-    const activeProvider = new GoogleAuthProvider();
-    for (const scope of YOUTUBE_SCOPES) {
-      activeProvider.addScope(scope);
-    }
+  private setState(nextState: YouTubePlayerState): void {
+    this.state = nextState;
+    this.emit('stateChange', {
+      state: this.state,
+      videoId: this.currentVideoId,
+    });
+  }
 
-    const currentEmail = existingUser?.email || undefined;
-    if (forceAccountPicker) {
-      activeProvider.setCustomParameters({
-        prompt: 'select_account',
-        include_granted_scopes: 'true',
-      });
-    } else if (currentEmail) {
-      activeProvider.setCustomParameters({
-        login_hint: currentEmail,
-        include_granted_scopes: 'true',
-      });
+  public async load(options: YouTubePlayerLoadOptions): Promise<void> {
+    this.currentVideoId = options.videoId;
+    this.currentTime = options.startSeconds ?? 0;
+    this.duration = 0;
+    this.setState('loading');
+    this.emit('timeUpdate', { currentTime: this.currentTime, duration: this.duration });
+
+    if (options.autoplay !== false) {
+      await this.play();
     } else {
-      activeProvider.setCustomParameters({
-        include_granted_scopes: 'true',
-      });
+      this.setState('paused');
     }
+  }
 
-    const result = await signInWithPopup(auth, activeProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Could not obtain Google access token for YouTube.');
+  public async play(): Promise<void> {
+    if (!this.currentVideoId) return;
+    this.setState('playing');
+  }
+
+  public async pause(): Promise<void> {
+    if (this.state === 'playing' || this.state === 'loading') {
+      this.setState('paused');
     }
+  }
 
-    setInMemoryToken(credential.accessToken, 3500);
-    return {
-      user: result.user,
-      accessToken: credential.accessToken,
-    };
-  } finally {
-    isSigningIn = false;
+  public async stop(): Promise<void> {
+    this.currentTime = 0;
+    this.setState('idle');
+    this.emit('timeUpdate', { currentTime: this.currentTime, duration: this.duration });
+  }
+
+  public async seekTo(seconds: number): Promise<void> {
+    const safeTime = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+    this.currentTime = this.duration > 0 ? Math.min(safeTime, this.duration) : safeTime;
+    this.emit('timeUpdate', { currentTime: this.currentTime, duration: this.duration });
+  }
+
+  public setVolume(volume: number): void {
+    this.volume = Math.max(0, Math.min(100, Math.round(volume)));
+    if (this.volume > 0 && this.muted) {
+      this.muted = false;
+    }
+  }
+
+  public getVolume(): number {
+    return this.volume;
+  }
+
+  public mute(): void {
+    this.muted = true;
+  }
+
+  public unmute(): void {
+    this.muted = false;
+  }
+
+  public isMuted(): boolean {
+    return this.muted;
+  }
+
+  public getCurrentTime(): number {
+    return this.currentTime;
+  }
+
+  public getDuration(): number {
+    return this.duration;
+  }
+
+  public getVideoId(): string | null {
+    return this.currentVideoId;
+  }
+
+  public getState(): YouTubePlayerState {
+    return this.state;
+  }
+
+  public destroy(): void {
+    this.currentVideoId = null;
+    this.currentTime = 0;
+    this.duration = 0;
+    this.setState('idle');
+    this.listeners.clear();
   }
 }
 
-export function getYouTubeAccessToken(): string | null {
-  if (cachedAccessToken && Date.now() >= tokenExpiresAt) {
-    cachedAccessToken = null;
-    tokenExpiresAt = 0;
-  }
-  return cachedAccessToken;
-}
-
-export function clearYouTubeAccessToken(): void {
-  cachedAccessToken = null;
-  tokenExpiresAt = 0;
-}
-
-export async function signOutYouTube(): Promise<void> {
-  cachedAccessToken = null;
-  tokenExpiresAt = 0;
-  await auth.signOut();
-}
+export const youtubePlayer = new YouTubePlayerService();
+export default youtubePlayer;
