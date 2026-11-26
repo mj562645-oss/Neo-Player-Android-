@@ -143,17 +143,25 @@ async function signInWithCapacitorNative(): Promise<{
   }
 
   let firebaseUser = auth.currentUser;
-  if (nativeResult.idToken) {
+
+  if (nativeResult.idToken || nativeResult.accessToken) {
     const credential = GoogleAuthProvider.credential(
-      nativeResult.idToken,
+      nativeResult.idToken || null,
       nativeResult.accessToken
     );
-    const userCred = await signInWithCredential(auth, credential);
-    firebaseUser = userCred.user;
+    try {
+      const userCred = await signInWithCredential(auth, credential);
+      firebaseUser = userCred.user;
+    } catch (credErr) {
+      // If Firebase already has a signed-in user for this session, keep it when idToken was omitted
+      if (!firebaseUser || nativeResult.idToken) {
+        throw credErr;
+      }
+    }
   }
 
   if (!firebaseUser) {
-    throw new Error('Could not establish a signed-in user session.');
+    throw new Error('Could not establish a signed-in Firebase user session.');
   }
 
   setInMemoryToken(nativeResult.accessToken, 3500);
