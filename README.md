@@ -34,10 +34,10 @@ Media3 playback with Android audio-focus and noisy-route handling for background
 playback remains subject to YouTube's own background playback restrictions.
 On Android, use **Pick Editable Files** when importing tracks that should be editable at the file
 level. Saving tag changes for scanned MediaStore tracks asks Android for write permission. Embedded
-tag writing currently supports MP3, M4A/MP4, FLAC, OGG, and WAV files. Missing metadata, artwork,
-and lyrics are fetched for new imports by default and can be disabled in Settings. Android requests
-notification permission when native local playback starts so playback controls can appear in the
-notification shade.
+tag writing currently supports MP3, M4A/MP4, FLAC, OGG, and WAV files, including mood labels and
+embedded album artwork. Missing metadata, artwork, and lyrics are fetched for new imports by default
+and can be disabled in Settings. Android requests notification permission when native local playback
+starts so playback controls can appear in the notification shade.
 
 The iOS, Material UI, and Windows visual themes use opaque, blur-free surfaces. The Neo Player
 theme retains the customizable glass effects.

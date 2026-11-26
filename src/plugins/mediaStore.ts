@@ -68,7 +68,11 @@ export interface MediaStorePlugin {
       genre: string;
       year?: number;
       trackNumber?: number;
+      mood?: string;
     };
+    artworkBase64?: string;
+    artworkMimeType?: string;
+    removeArtwork?: boolean;
   }): Promise<void>;
   resolvePlayableFile(options: ResolvePlayableFileOptions): Promise<ResolvePlayableFileResult>;
   clearMediaCache(): Promise<ClearMediaCacheResult>;
@@ -86,7 +90,42 @@ export type EditableTrackTags = {
   genre: string;
   year?: number;
   trackNumber?: number;
+  mood?: string;
 };
+
+export interface EmbeddedArtworkChange {
+  file?: File;
+  remove?: boolean;
+}
+
+const MAX_EMBEDDED_ARTWORK_BYTES = 10 * 1024 * 1024;
+
+async function encodeArtwork(file: File): Promise<string> {
+  if (file.size === 0 || file.size > MAX_EMBEDDED_ARTWORK_BYTES) {
+    throw new Error('Choose an album cover smaller than 10 MB.');
+  }
+  if (file.type && !file.type.startsWith('image/')) {
+    throw new Error('The selected album cover is not a supported image.');
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('Unable to read the album cover.'));
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Unable to encode the album cover.'));
+        return;
+      }
+      const base64 = reader.result.split(',', 2)[1];
+      if (!base64) {
+        reject(new Error('Unable to encode the album cover.'));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export function isNativeMediaStoreAvailable(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
@@ -94,7 +133,8 @@ export function isNativeMediaStoreAvailable(): boolean {
 
 export async function writeTrackTags(
   track: Track,
-  tags: EditableTrackTags
+  tags: EditableTrackTags,
+  artwork?: EmbeddedArtworkChange
 ): Promise<void> {
   if (!isNativeMediaStoreAvailable()) {
     throw new Error('Writing embedded audio tags requires the Android app.');
@@ -105,10 +145,17 @@ export async function writeTrackTags(
   ) {
     throw new Error('Re-import this track with the Android file picker to edit its embedded tags.');
   }
+  if (artwork?.file && artwork.remove) {
+    throw new Error('An album cover cannot be added and removed in the same edit.');
+  }
+  const artworkBase64 = artwork?.file ? await encodeArtwork(artwork.file) : undefined;
   await MediaStore.writeTrackTags({
     contentUri: track.contentUri,
     source: track.source,
     tags,
+    artworkBase64,
+    artworkMimeType: artwork?.file?.type || 'image/jpeg',
+    removeArtwork: artwork?.remove,
   });
 }
 

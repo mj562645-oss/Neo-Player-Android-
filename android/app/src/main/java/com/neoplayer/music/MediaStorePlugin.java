@@ -33,6 +33,9 @@ import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
 import org.jaudiotagger.tag.FieldKey;
 import org.jaudiotagger.tag.Tag;
+import org.jaudiotagger.tag.images.Artwork;
+import org.jaudiotagger.tag.images.ArtworkFactory;
+import org.jaudiotagger.tag.reference.PictureTypes;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -379,6 +382,29 @@ public class MediaStorePlugin extends Plugin {
                 setTagField(tag, FieldKey.GENRE, jsonString(tags, "genre"));
                 setTagField(tag, FieldKey.YEAR, jsonString(tags, "year"));
                 setTagField(tag, FieldKey.TRACK, jsonString(tags, "trackNumber"));
+                if (tags.has("mood")) {
+                    setTagField(tag, FieldKey.MOOD, jsonString(tags, "mood"));
+                }
+                if (call.getBoolean("removeArtwork", false)) {
+                    tag.deleteArtworkField();
+                } else {
+                    String artworkBase64 = call.getString("artworkBase64");
+                    if (artworkBase64 != null && !artworkBase64.isEmpty()) {
+                        byte[] imageBytes = Base64.decode(artworkBase64, Base64.DEFAULT);
+                        if (imageBytes.length == 0) {
+                            throw new IllegalArgumentException("The selected cover image is empty.");
+                        }
+                        Artwork artwork = ArtworkFactory.getNew();
+                        artwork.setBinaryData(imageBytes);
+                        artwork.setMimeType(
+                            call.getString("artworkMimeType", "image/jpeg")
+                        );
+                        artwork.setDescription("Cover");
+                        artwork.setPictureType(PictureTypes.DEFAULT_ID);
+                        tag.deleteArtworkField();
+                        tag.setField(artwork);
+                    }
+                }
                 audioFile.commit();
 
                 sourceWriteAttempted = true;

@@ -25,12 +25,15 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
   open,
   onOpenChange,
 }) => {
-  const { updateTrack, updateTrackArtwork, deleteTrackArtwork, downloadLyricsForTrack } =
-    useLibrary();
+  const { updateTrack, downloadLyricsForTrack } = useLibrary();
   const { settings } = useTheme();
   const artInputRef = useRef<HTMLInputElement | null>(null);
   const trackRef = useRef(track);
   trackRef.current = track;
+  const openRef = useRef(open);
+  openRef.current = open;
+  const lookupRequestIdRef = useRef(0);
+  const candidateRequestIdRef = useRef(0);
   const trackId = track?.id;
 
   const [title, setTitle] = useState('');
@@ -41,8 +44,15 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
   const [year, setYear] = useState('');
   const [trackNumber, setTrackNumber] = useState('');
   const [moodTags, setMoodTags] = useState<string[]>([]);
+  const [pendingArtworkFile, setPendingArtworkFile] = useState<File | null>(null);
+  const [pendingArtworkUrl, setPendingArtworkUrl] = useState<string | null>(null);
+  const [pendingArtworkSource, setPendingArtworkSource] = useState<'manual' | 'candidate' | null>(
+    null
+  );
+  const [removeArtwork, setRemoveArtwork] = useState(false);
 
   const [lookingUp, setLookingUp] = useState(false);
+  const [applyingCandidate, setApplyingCandidate] = useState(false);
   const [downloadingLyrics, setDownloadingLyrics] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -51,8 +61,14 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
 
   useEffect(() => {
+    lookupRequestIdRef.current += 1;
+    candidateRequestIdRef.current += 1;
     const currentTrack = trackRef.current;
-    if (!open || !currentTrack || currentTrack.id !== trackId) return;
+    if (!open || !currentTrack || currentTrack.id !== trackId) {
+      setLookingUp(false);
+      setApplyingCandidate(false);
+      return;
+    }
     setTitle(currentTrack.title);
     setArtist(currentTrack.artist);
     setAlbum(currentTrack.album);
@@ -61,26 +77,40 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     setYear(currentTrack.year ? String(currentTrack.year) : '');
     setTrackNumber(currentTrack.trackNumber ? String(currentTrack.trackNumber) : '');
     setMoodTags(currentTrack.moodTags || []);
+    setPendingArtworkFile(null);
+    setPendingArtworkSource(null);
+    setRemoveArtwork(false);
     setSaveError(null);
     setLookupStatus(null);
     setCandidates([]);
     setSelectedCandidateId(null);
+    setLookingUp(false);
+    setApplyingCandidate(false);
   }, [open, trackId]);
+
+  useEffect(() => {
+    if (!pendingArtworkFile) {
+      setPendingArtworkUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(pendingArtworkFile);
+    setPendingArtworkUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [pendingArtworkFile]);
 
   if (!track) return null;
 
-  const canWriteEmbeddedTags =
-    isNativeMediaStoreAvailable() &&
-    Boolean(track.contentUri) &&
-    (track.source === 'document' || track.source === 'mediastore');
   const tagFormatSupported = ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(
     track.format.toUpperCase()
   );
+  const canWriteEmbeddedTags =
+    isNativeMediaStoreAvailable() &&
+    Boolean(track.contentUri) &&
+    (track.source === 'document' || track.source === 'mediastore') &&
+    tagFormatSupported;
   const tagWriteHint = !canWriteEmbeddedTags
-    ? 'Tags save in Neo Player; re-import with Pick Editable Files to write to the original file'
-    : tagFormatSupported
-      ? 'Saving writes tags to the original file'
-      : 'This format only supports tags saved in Neo Player';
+    ? 'Tags and artwork save in Neo Player; re-import with Pick Editable Files to embed them'
+    : 'Saving embeds text tags, mood labels, and album artwork in the original file';
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,16 +120,26 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     setSaving(true);
     setSaveError(null);
     try {
-      await updateTrack(track.id, {
-        title,
-        artist,
-        album,
-        albumArtist,
-        genre,
-        year: parsedYear && parsedYear >= 1900 && parsedYear <= 2100 ? parsedYear : undefined,
-        trackNumber: parsedTrackNum && parsedTrackNum > 0 ? parsedTrackNum : undefined,
-        moodTags,
-      });
+      await updateTrack(
+        track.id,
+        {
+          title,
+          artist,
+          album,
+          albumArtist,
+          genre,
+          year: parsedYear && parsedYear >= 1900 && parsedYear <= 2100 ? parsedYear : undefined,
+          trackNumber: parsedTrackNum && parsedTrackNum > 0 ? parsedTrackNum : undefined,
+          moodTags,
+        },
+        {
+          artworkFile: pendingArtworkFile || undefined,
+          removeArtwork,
+          moodTagNames: settings.moodCategories
+            .filter((mood) => moodTags.includes(mood.id))
+            .map((mood) => mood.name),
+        }
+      );
       onOpenChange(false);
     } catch (error) {
       setSaveError(
@@ -113,16 +153,25 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
   const handleArtChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    try {
-      await updateTrackArtwork(track.id, file);
-      setSaveError(null);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Unable to update album artwork.');
-    }
+    setPendingArtworkFile(file);
+    setPendingArtworkSource('manual');
+    setRemoveArtwork(false);
+    setLookupStatus('Cover selected. Save Changes to embed it and update your library.');
+    setSaveError(null);
     e.target.value = '';
   };
 
   const applyCandidate = async (candidate: MetadataCandidate) => {
+    if (
+      applyingCandidate ||
+      !openRef.current ||
+      !track ||
+      trackRef.current?.id !== track.id
+    ) {
+      return;
+    }
+    const requestId = ++candidateRequestIdRef.current;
+    setApplyingCandidate(true);
     setSelectedCandidateId(candidate.recordingId);
     setTitle(candidate.title);
     setArtist(candidate.artist);
@@ -131,30 +180,58 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     if (candidate.genre) setGenre(candidate.genre);
     if (candidate.year) setYear(String(candidate.year));
     if (candidate.trackNumber) setTrackNumber(String(candidate.trackNumber));
+    if (pendingArtworkSource === 'candidate') {
+      setPendingArtworkFile(null);
+      setPendingArtworkSource(null);
+    }
 
     setLookupStatus('Applied tags. Checking Cover Art Archive...');
     try {
       const coverBlob = await downloadCoverBlob(candidate);
+      if (
+        requestId !== candidateRequestIdRef.current ||
+        !openRef.current ||
+        trackRef.current?.id !== track.id
+      ) {
+        return;
+      }
       if (coverBlob) {
         const coverFile = new File([coverBlob], `${track.id}-cover.jpg`, {
           type: coverBlob.type || 'image/jpeg',
         });
-        await updateTrackArtwork(track.id, coverFile);
-        setLookupStatus('Tags filled and album cover downloaded. Save Changes to keep tags.');
+        setPendingArtworkFile(coverFile);
+        setPendingArtworkSource('candidate');
+        setRemoveArtwork(false);
+        setLookupStatus(
+          'Tags and cover selected. Save Changes to embed them and update your library.'
+        );
       } else {
         setLookupStatus('Tags filled (no cover found in Cover Art Archive). Save Changes to keep.');
       }
     } catch (error) {
+      if (
+        requestId !== candidateRequestIdRef.current ||
+        !openRef.current ||
+        trackRef.current?.id !== track.id
+      ) {
+        return;
+      }
       setLookupStatus(
         error instanceof Error
           ? `Tags filled, but album cover could not be saved: ${error.message}`
           : 'Tags filled, but album cover could not be saved.'
       );
+    } finally {
+      if (requestId === candidateRequestIdRef.current) {
+        setApplyingCandidate(false);
+      }
     }
   };
 
   const handleAutoLookup = async () => {
-    if (lookingUp) return;
+    if (lookingUp || applyingCandidate) return;
+    const requestId = ++lookupRequestIdRef.current;
+    const lookupTrackId = track.id;
     setLookingUp(true);
     setLookupStatus('Searching MusicBrainz & Cover Art Archive...');
     try {
@@ -173,6 +250,13 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         duration: track.duration,
       });
 
+      if (
+        requestId !== lookupRequestIdRef.current ||
+        !openRef.current ||
+        trackRef.current?.id !== lookupTrackId
+      ) {
+        return;
+      }
       setCandidates(list);
       if (list.length === 0) {
         setLookupStatus('No matching releases found on MusicBrainz.');
@@ -181,11 +265,19 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
 
       await applyCandidate(list[0]);
     } catch (err) {
-      setLookupStatus(
-        err instanceof Error ? err.message : 'Unable to reach MusicBrainz right now.'
-      );
+      if (
+        requestId === lookupRequestIdRef.current &&
+        openRef.current &&
+        trackRef.current?.id === lookupTrackId
+      ) {
+        setLookupStatus(
+          err instanceof Error ? err.message : 'Unable to reach MusicBrainz right now.'
+        );
+      }
     } finally {
-      setLookingUp(false);
+      if (requestId === lookupRequestIdRef.current) {
+        setLookingUp(false);
+      }
     }
   };
 
@@ -224,6 +316,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         ref={artInputRef}
         type="file"
         accept="image/*"
+        disabled={saving || applyingCandidate || lookingUp}
         onChange={handleArtChange}
         className="hidden"
       />
@@ -232,7 +325,8 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <AlbumArtwork
-              artworkId={track.artworkId}
+              artworkId={removeArtwork || pendingArtworkFile ? undefined : track.artworkId}
+              artworkUrl={pendingArtworkUrl || undefined}
               alt={track.title}
               fallbackSeed={`${track.album}-${track.artist}`}
               size="lg"
@@ -243,14 +337,26 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
                 Album Artwork
               </p>
               <div className="flex flex-wrap gap-2">
-                <GlassButton size="sm" onClick={() => artInputRef.current?.click()}>
+                <GlassButton
+                  size="sm"
+                  disabled={saving || applyingCandidate || lookingUp}
+                  onClick={() => artInputRef.current?.click()}
+                >
                   <ImagePlus className="w-3.5 h-3.5" />
-                  <span>{track.artworkId ? 'Replace Cover' : 'Add Cover'}</span>
+                  <span>
+                    {track.artworkId || pendingArtworkFile ? 'Replace Cover' : 'Add Cover'}
+                  </span>
                 </GlassButton>
-                {track.artworkId && (
+                {(track.artworkId || pendingArtworkFile) && (
                   <GlassButton
                     size="sm"
-                    onClick={() => void deleteTrackArtwork(track.id)}
+                    disabled={saving || applyingCandidate || lookingUp}
+                    onClick={() => {
+                      setPendingArtworkFile(null);
+                      setPendingArtworkSource(null);
+                      setRemoveArtwork(true);
+                      setLookupStatus('Cover will be removed when you save these changes.');
+                    }}
                     className="text-red-600 dark:text-red-400"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -265,7 +371,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
             <GlassButton
               size="sm"
               variant="accent"
-              disabled={lookingUp}
+              disabled={lookingUp || applyingCandidate || saving}
               onClick={() => void handleAutoLookup()}
             >
               {lookingUp ? (
@@ -313,6 +419,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
                   <button
                     key={`${cand.recordingId}-${cand.releaseId || ''}`}
                     type="button"
+                    disabled={applyingCandidate || lookingUp || saving}
                     onClick={() => void applyCandidate(cand)}
                     className="w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-black/5 dark:hover:bg-white/8 transition-colors cursor-pointer"
                   >
@@ -380,8 +487,12 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
           <GlassButton variant="ghost" disabled={saving} onClick={() => onOpenChange(false)}>
             Cancel
           </GlassButton>
-          <GlassButton type="submit" variant="accent" disabled={saving}>
-            {saving ? 'Saving Tags...' : 'Save Changes'}
+          <GlassButton
+            type="submit"
+            variant="accent"
+            disabled={saving || lookingUp || applyingCandidate}
+          >
+            {saving ? 'Saving Tags...' : applyingCandidate ? 'Applying Match...' : 'Save Changes'}
           </GlassButton>
         </div>
       </form>

@@ -64,6 +64,12 @@ interface EnrichProgress {
   currentTitle: string;
 }
 
+interface TrackEditOptions {
+  artworkFile?: File;
+  removeArtwork?: boolean;
+  moodTagNames?: string[];
+}
+
 interface LibraryContextValue {
   tracks: Track[];
   albums: Album[];
@@ -100,7 +106,8 @@ interface LibraryContextValue {
         Track,
         'title' | 'artist' | 'album' | 'albumArtist' | 'genre' | 'year' | 'trackNumber' | 'moodTags'
       >
-    >
+    >,
+    options?: TrackEditOptions
   ) => Promise<void>;
   updateTrackArtwork: (trackId: string, imageFile: File) => Promise<void>;
   deleteTrackArtwork: (trackId: string) => Promise<void>;
@@ -463,7 +470,8 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
           Track,
           'title' | 'artist' | 'album' | 'albumArtist' | 'genre' | 'year' | 'trackNumber' | 'moodTags'
         >
-      >
+      >,
+      options?: TrackEditOptions
     ) => {
       const target = tracks.find((t) => t.id === trackId);
       if (!target) throw new Error('This track is no longer in the library.');
@@ -473,22 +481,40 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         (target.source === 'document' || target.source === 'mediastore') &&
         ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(target.format.toUpperCase());
       if (canWriteEmbeddedTags) {
-        await writeTrackTags(target, {
-          title: patch.title ?? target.title,
-          artist: patch.artist ?? target.artist,
-          album: patch.album ?? target.album,
-          albumArtist: patch.albumArtist ?? target.albumArtist,
-          genre: patch.genre ?? target.genre,
-          year: patch.year,
-          trackNumber: patch.trackNumber,
-        });
+        await writeTrackTags(
+          target,
+          {
+            title: patch.title ?? target.title,
+            artist: patch.artist ?? target.artist,
+            album: patch.album ?? target.album,
+            albumArtist: patch.albumArtist ?? target.albumArtist,
+            genre: patch.genre ?? target.genre,
+            year: patch.year,
+            trackNumber: patch.trackNumber,
+            mood: options?.moodTagNames?.join('; '),
+          },
+          {
+            file: options?.artworkFile,
+            remove: options?.removeArtwork,
+          }
+        );
       }
-      const updated = await updateTrackInfo(target, patch);
+      let updated = await updateTrackInfo(target, patch);
+      if (options?.artworkFile) {
+        updated = await replaceTrackArtwork(
+          updated,
+          options.artworkFile,
+          tracksRef.current,
+          playlistsRef.current
+        );
+      } else if (options?.removeArtwork) {
+        updated = await removeTrackArtwork(updated, tracksRef.current, playlistsRef.current);
+      }
       setTracks((prev) => prev.map((t) => (t.id === trackId ? updated : t)));
       showToast(
         canWriteEmbeddedTags
-          ? 'Track tags saved to the original file'
-          : 'Track tags saved in Neo Player only. Re-import with Pick Editable Files to update the original file.',
+          ? 'Track tags, moods, and cover saved to the original file'
+          : 'Track tags, moods, and cover saved in Neo Player only. Re-import with Pick Editable Files to update the original file.',
         canWriteEmbeddedTags ? 'success' : 'info'
       );
     },
