@@ -1,3 +1,4 @@
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
@@ -5,12 +6,15 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   setPersistence,
+  signInWithCredential,
   signInWithPopup,
   type User,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.readonly'] as const;
+const NATIVE_WEB_CLIENT_ID =
+  '290444623209-0vo15v3j0vra84ao7lcjb85v27mt9sfh.apps.googleusercontent.com';
 
 interface GisTokenResponse {
   access_token?: string;
@@ -63,7 +67,7 @@ const GIS_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
 let gisLoadPromise: Promise<boolean> | null = null;
 
 function preloadGisClient(): Promise<boolean> {
-  if (typeof document === 'undefined') return Promise.resolve(false);
+  if (isCapacitorNative() || typeof document === 'undefined') return Promise.resolve(false);
   if (getGisOAuth2()) return Promise.resolve(true);
   if (gisLoadPromise) return gisLoadPromise;
 
@@ -107,11 +111,56 @@ void setPersistence(auth, browserLocalPersistence).catch(() => {
 let cachedAccessToken: string | null = null;
 let tokenExpiresAt = 0;
 let isSigningIn = false;
+let nativeInitialized = false;
 
 function setInMemoryToken(token: string, expiresInSeconds = 3500): void {
   cachedAccessToken = token;
   const ttlMs = Math.max(120, Math.min(3600, expiresInSeconds)) * 1000;
   tokenExpiresAt = Date.now() + ttlMs;
+}
+
+async function ensureNativeGoogleSignIn(): Promise<void> {
+  const clientId =
+    (firebaseConfig as { oAuthClientId?: string }).oAuthClientId || NATIVE_WEB_CLIENT_ID;
+  if (!nativeInitialized) {
+    await GoogleSignIn.initialize({
+      clientId,
+      scopes: [...YOUTUBE_SCOPES],
+    });
+    nativeInitialized = true;
+  }
+}
+
+async function signInWithCapacitorNative(): Promise<{
+  user: User;
+  accessToken: string;
+}> {
+  await ensureNativeGoogleSignIn();
+
+  const nativeResult = await GoogleSignIn.signIn();
+  if (!nativeResult.accessToken) {
+    throw new Error('Google Sign-In did not return a YouTube OAuth access token.');
+  }
+
+  let firebaseUser = auth.currentUser;
+  if (nativeResult.idToken) {
+    const credential = GoogleAuthProvider.credential(
+      nativeResult.idToken,
+      nativeResult.accessToken
+    );
+    const userCred = await signInWithCredential(auth, credential);
+    firebaseUser = userCred.user;
+  }
+
+  if (!firebaseUser) {
+    throw new Error('Could not establish a signed-in user session.');
+  }
+
+  setInMemoryToken(nativeResult.accessToken, 3500);
+  return {
+    user: firebaseUser,
+    accessToken: nativeResult.accessToken,
+  };
 }
 
 export function initYouTubeAuth(handlers: {
@@ -221,9 +270,7 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
     isSigningIn = true;
 
     if (isCapacitorNative()) {
-      throw new Error(
-        'Native Google Sign-In plugin is not installed yet. Add a Capacitor Google Auth plugin to continue on Android.'
-      );
+      return await signInWithCapacitorNative();
     }
 
     const existingUser = auth.currentUser;
@@ -305,5 +352,12 @@ export function clearYouTubeAccessToken(): void {
 export async function signOutYouTube(): Promise<void> {
   cachedAccessToken = null;
   tokenExpiresAt = 0;
+  if (isCapacitorNative()) {
+    try {
+      await GoogleSignIn.signOut();
+    } catch {
+      // Ignore native sign-out errors if already signed out
+    }
+  }
   await auth.signOut();
 }
