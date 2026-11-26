@@ -487,7 +487,15 @@ export const YouTubeProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return true;
       } catch (err) {
         const rawMsg = err instanceof Error ? err.message : '';
-        const msg = rawMsg.includes('popup-closed')
+        const signInCanceled =
+          (typeof err === 'object' &&
+            err !== null &&
+            'code' in err &&
+            err.code === 'SIGN_IN_CANCELED') ||
+          rawMsg.toLowerCase().includes('activity cancelled by user');
+        const msg = signInCanceled
+          ? 'Google sign-in was canceled. If this happened after selecting your account, verify the Android OAuth client matches com.neoplayer.music and the SHA-1 signing certificate for this installed build. If the OAuth consent screen is in testing, add this Google account as a test user, then retry and approve YouTube access.'
+          : rawMsg.includes('popup-closed')
           ? 'Google sign-in was cancelled.'
           : rawMsg.includes('popup-blocked')
             ? 'Browser blocked the Google window — tap Sync once more to confirm permissions.'

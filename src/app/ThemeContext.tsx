@@ -88,8 +88,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       audioEngine.setVolume(loaded.volume, loaded.muted);
       audioEngine.setPlaybackRate(loaded.playbackRate);
-      youtubePlayer.setVolume(loaded.volume, loaded.muted);
-      youtubePlayer.setPlaybackRate(loaded.playbackRate);
+      youtubePlayer.setVolume(loaded.muted ? 0 : loaded.volume);
       audioEngine.setVolumeNormalization(loaded.volumeNormalization);
       audioEngine.setEqualizer(loaded.equalizer);
       setSettingsLoaded(true);
@@ -128,11 +127,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       if (patch.volume !== undefined || patch.muted !== undefined) {
         audioEngine.setVolume(next.volume, next.muted);
-        youtubePlayer.setVolume(next.volume, next.muted);
+        youtubePlayer.setVolume(next.muted ? 0 : next.volume);
       }
       if (patch.playbackRate !== undefined) {
         audioEngine.setPlaybackRate(next.playbackRate);
-        youtubePlayer.setPlaybackRate(next.playbackRate);
       }
       if (patch.volumeNormalization !== undefined) {
         audioEngine.setVolumeNormalization(next.volumeNormalization);

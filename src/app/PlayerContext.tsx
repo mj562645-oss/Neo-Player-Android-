@@ -71,6 +71,13 @@ function isYouTubeTrack(track?: Track | null): boolean {
   return Boolean(track && track.source === 'youtube' && track.youtubeVideoId);
 }
 
+function getNativePlaybackUri(track?: Track | null): string | null {
+  if (!track) return null;
+  if (track.nativeAudioUri) return track.nativeAudioUri;
+  if (track.source === 'mediastore' && track.contentUri) return track.contentUri;
+  return null;
+}
+
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
     tracks,
@@ -101,6 +108,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const hydratedRef = useRef(false);
   const lastSavedPosRef = useRef(0);
   const currentTrackRef = useRef<Track | null>(null);
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
   const sleepTimerModeRef = useRef<SleepTimerMode>('off');
   sleepTimerModeRef.current = sleepTimerMode;
   const crossfadeSecondsRef = useRef(0);
@@ -114,6 +123,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const isPlayingRef = useRef<boolean>(isPlaying);
   isPlayingRef.current = isPlaying;
   const crossfadeTriggeredKeyRef = useRef<string | null>(null);
+  const nativeEndedTrackRef = useRef<string | null>(null);
 
   const registerExternalTracks = useCallback((list: Track[]) => {
     const ytTracks = list.filter((t) => isYouTubeTrack(t));
@@ -162,9 +172,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const getActivePosition = useCallback(() => {
-    return isYouTubeTrack(currentTrackRef.current)
-      ? youtubePlayer.getCurrentTime()
-      : audioEngine.getCurrentTime();
+    const track = currentTrackRef.current;
+    if (isYouTubeTrack(track)) return youtubePlayer.getCurrentTime();
+    if (isNativeAudioAvailable() && getNativePlaybackUri(track)) return currentTimeRef.current;
+    return audioEngine.getCurrentTime();
   }, []);
 
   // Persist playback state helper (only persist local library queue across restarts)
@@ -214,8 +225,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setCurrentTrackId(targetTrack.id);
           setCurrentTime(saved.position || 0);
           setDuration(targetTrack.duration || 0);
-          if (isNativeAudioAvailable() && targetTrack.nativeAudioUri) {
-            await NativeAudio.playLocal({ uri: targetTrack.nativeAudioUri, title: targetTrack.title, artist: targetTrack.artist, positionMs: (saved.position || 0) * 1000 });
+          const nativeUri = getNativePlaybackUri(targetTrack);
+          if (isNativeAudioAvailable() && nativeUri) {
+            await NativeAudio.playLocal({
+              uri: nativeUri,
+              title: targetTrack.title,
+              artist: targetTrack.artist,
+              positionMs: (saved.position || 0) * 1000,
+            });
             await NativeAudio.pause();
           } else {
             await audioEngine.loadTrack(targetTrack, saved.position || 0, false);
@@ -258,6 +275,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setCurrentTime(startPos);
 
       if (isYouTubeTrack(targetTrack)) {
+        if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+          await NativeAudio.pause();
+        }
         audioEngine.pause();
         const ok = await youtubePlayer.loadTrack(targetTrack, startPos, true);
         if (!ok) {
@@ -265,12 +285,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       } else {
         youtubePlayer.pause();
-        if (isNativeAudioAvailable() && targetTrack.nativeAudioUri) {
+        const nativeUri = getNativePlaybackUri(targetTrack);
+        if (isNativeAudioAvailable() && nativeUri) {
           audioEngine.pause();
-          await NativeAudio.playLocal({ uri: targetTrack.nativeAudioUri, title: targetTrack.title, artist: targetTrack.artist, positionMs: startPos * 1000 });
+          await NativeAudio.playLocal({
+            uri: nativeUri,
+            title: targetTrack.title,
+            artist: targetTrack.artist,
+            positionMs: startPos * 1000,
+          });
           setIsPlaying(true);
           void recordTrackPlay(targetTrack.id);
         } else {
+          if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+            await NativeAudio.pause();
+          }
           const ok = await audioEngine.loadTrack(targetTrack, startPos, true);
           if (ok) void recordTrackPlay(targetTrack.id);
         }
@@ -290,6 +319,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const outgoingTrack = currentTrackRef.current;
       const outgoingIsYt = isYouTubeTrack(outgoingTrack);
       const incomingIsYt = isYouTubeTrack(targetTrack);
+      const usesNativePlayback =
+        isNativeAudioAvailable() &&
+        (Boolean(getNativePlaybackUri(outgoingTrack)) || Boolean(getNativePlaybackUri(targetTrack)));
 
       setCurrentTrackId(targetTrack.id);
       setCurrentIndex(indexInQueue);
@@ -297,7 +329,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setCurrentTime(0);
       persistState({ currentTrackId: targetTrack.id, currentIndex: indexInQueue, position: 0 });
 
-      if (!outgoingIsYt && !incomingIsYt) {
+      if (usesNativePlayback) {
+        await startTrackAt(targetTrack, indexInQueue, 0);
+      } else if (!outgoingIsYt && !incomingIsYt) {
         // Local -> Local: seamless dual-deck overlapping equal-power crossfade
         const ok = await audioEngine.crossfadeToTrack(targetTrack, fadeSeconds, 0);
         if (ok) {
@@ -329,7 +363,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       }
     },
-    [trackById, persistState, recordTrackPlay]
+    [trackById, persistState, recordTrackPlay, startTrackAt]
   );
 
   const playTrack = useCallback(
@@ -390,23 +424,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   useEffect(() => {
-    if (!isNativeAudioAvailable() || !currentTrack?.nativeAudioUri) return;
-    let active = true;
-    const poll = async () => {
-      try {
-        const status = await NativeAudio.getStatus();
-        if (!active) return;
-        setIsPlaying(status.isPlaying);
-        if (status.positionMs >= 0) setCurrentTime(status.positionMs / 1000);
-        if (status.durationMs > 0) setDuration(status.durationMs / 1000);
-      } catch (error) { console.warn('[Neo Player] Native playback status unavailable', error); }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [currentTrack?.id, currentTrack?.nativeAudioUri]);
-
-  useEffect(() => {
     void syncScreenWakeLock(isPlaying && settings.keepScreenAwake);
   }, [isPlaying, settings.keepScreenAwake]);
 
@@ -432,10 +449,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return;
     }
 
-    if (isNativeAudioAvailable() && currentTrack.nativeAudioUri) {
+    const nativeUri = getNativePlaybackUri(currentTrack);
+    if (isNativeAudioAvailable() && nativeUri) {
       const status = await NativeAudio.getStatus();
       if (status.isPlaying) { await NativeAudio.pause(); setIsPlaying(false); }
-      else { await NativeAudio.playLocal({ uri: currentTrack.nativeAudioUri, title: currentTrack.title, artist: currentTrack.artist, positionMs: currentTime * 1000 }); setIsPlaying(true); }
+      else {
+        await NativeAudio.playLocal({
+          uri: nativeUri,
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          positionMs: currentTime * 1000,
+        });
+        setIsPlaying(true);
+      }
     } else if (audioEngine.isPlaying()) {
       audioEngine.pause();
     } else {
@@ -449,7 +475,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (isYouTubeTrack(currentTrackRef.current)) {
       youtubePlayer.pause();
     } else {
-      if (isNativeAudioAvailable() && currentTrackRef.current?.nativeAudioUri) void NativeAudio.pause();
+      if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) void NativeAudio.pause();
       else audioEngine.pause();
     }
   }, []);
@@ -499,6 +525,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (isYouTubeTrack(currentTrackRef.current)) {
         youtubePlayer.pause();
         youtubePlayer.seek(0);
+      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+        await NativeAudio.pause();
+        await NativeAudio.seek({ positionMs: 0 });
       } else {
         audioEngine.pause();
         audioEngine.seek(0);
@@ -507,12 +536,51 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [queue.length, currentIndex, repeat, playQueueIndex, settings.hapticFeedback]);
 
+  useEffect(() => {
+    if (!currentTrack || !isNativeAudioAvailable() || !getNativePlaybackUri(currentTrack)) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const status = await NativeAudio.getStatus();
+        if (!active) return;
+        setIsPlaying(status.isPlaying);
+        if (status.positionMs >= 0) setCurrentTime(status.positionMs / 1000);
+        if (status.durationMs > 0) setDuration(status.durationMs / 1000);
+        if (
+          !status.isPlaying &&
+          status.durationMs > 0 &&
+          status.positionMs >= status.durationMs &&
+          nativeEndedTrackRef.current !== currentTrack.id
+        ) {
+          nativeEndedTrackRef.current = currentTrack.id;
+          await nextTrack();
+        }
+      } catch (error) {
+        console.warn('[Neo Player] Native playback status unavailable', error);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [
+    currentTrack?.id,
+    currentTrack?.nativeAudioUri,
+    currentTrack?.contentUri,
+    currentTrack?.source,
+    nextTrack,
+  ]);
+
   const prevTrack = useCallback(async () => {
     if (queue.length === 0) return;
     const ct = getActivePosition();
     if (ct > 3) {
       if (isYouTubeTrack(currentTrackRef.current)) {
         youtubePlayer.seek(0);
+      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+        void NativeAudio.seek({ positionMs: 0 });
       } else {
         audioEngine.seek(0);
       }
@@ -526,6 +594,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } else {
       if (isYouTubeTrack(currentTrackRef.current)) {
         youtubePlayer.seek(0);
+      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+        void NativeAudio.seek({ positionMs: 0 });
       } else {
         audioEngine.seek(0);
       }
@@ -538,7 +608,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       crossfadeTriggeredKeyRef.current = null;
       if (isYouTubeTrack(currentTrackRef.current)) {
         youtubePlayer.seek(seconds);
-      } else if (isNativeAudioAvailable() && currentTrackRef.current?.nativeAudioUri) {
+      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
         void NativeAudio.seek({ positionMs: seconds * 1000 });
       } else {
         audioEngine.seek(seconds);

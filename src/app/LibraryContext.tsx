@@ -46,6 +46,11 @@ interface ImportProgress {
   currentFile: string;
 }
 
+interface MediaStoreScanOptions {
+  silent?: boolean;
+  requestPermission?: boolean;
+}
+
 interface EnrichProgress {
   active: boolean;
   done: number;
@@ -64,7 +69,7 @@ interface LibraryContextValue {
   importProgress: ImportProgress;
   enrichProgress: EnrichProgress;
   importFiles: (files: FileList | File[]) => Promise<Track[]>;
-  scanDeviceMediaStore: () => Promise<Track[]>;
+  scanDeviceMediaStore: (options?: MediaStoreScanOptions) => Promise<Track[]>;
   downloadLyricsForTrack: (
     trackId: string,
     candidate?: LyricsCandidate,
@@ -155,6 +160,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const lyricsMapRef = useRef<Record<string, LyricsDocument>>(lyricsMap);
   lyricsMapRef.current = lyricsMap;
   const enrichCancelRef = useRef(false);
+  const autoScanStartedRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -243,20 +249,24 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [tracks, showToast]
   );
 
-  const scanDeviceMediaStore = useCallback(async () => {
+  const scanDeviceMediaStore = useCallback(async (options: MediaStoreScanOptions = {}) => {
     if (!isNativeMediaStoreAvailable()) {
-      showToast('MediaStore device scanning requires the compiled Android app.', 'info');
+      if (!options.silent) {
+        showToast('MediaStore device scanning requires the compiled Android app.', 'info');
+      }
       return [];
     }
 
     setIsScanningMediaStore(true);
     try {
       let perm = await MediaStore.checkAudioPermission();
-      if (!perm.granted) {
+      if (!perm.granted && options.requestPermission !== false) {
         perm = await MediaStore.requestAudioPermission();
       }
       if (!perm.granted) {
-        showToast('Audio permission is required to scan music on this Android device.', 'error');
+        if (!options.silent) {
+          showToast('Audio permission is required to scan music on this Android device.', 'error');
+        }
         return [];
       }
 
@@ -274,13 +284,13 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (!scanResult.tracks || scanResult.tracks.length === 0) {
         setImportProgress({ active: false, done: 0, total: 0, currentFile: '' });
-        showToast('No music tracks found in Android MediaStore.', 'info');
+        if (!options.silent) showToast('No music tracks found in Android MediaStore.', 'info');
         return [];
       }
 
       const result = await importMediaStoreTracks(
         scanResult.tracks,
-        tracks,
+        tracksRef.current,
         (done, total, currentFile) => {
           setImportProgress({ active: done < total, done, total, currentFile });
         }
@@ -292,10 +302,12 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setTracks((prev) =>
           [...result.importedTracks, ...prev].sort((a, b) => b.addedAt - a.addedAt)
         );
-        showToast(
-          `Added ${result.importedTracks.length} track${result.importedTracks.length === 1 ? '' : 's'} from Android MediaStore`,
-          'success'
-        );
+        if (!options.silent) {
+          showToast(
+            `Added ${result.importedTracks.length} track${result.importedTracks.length === 1 ? '' : 's'} from Android MediaStore`,
+            'success'
+          );
+        }
         try {
           const currentSettings = await db.getSettings();
           if (currentSettings.autoEnrichOnImport) {
@@ -315,7 +327,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       } else if (result.quotaError) {
         showToast(result.quotaError, 'error');
-      } else {
+      } else if (!options.silent) {
         showToast('Device music library is already up to date.', 'info');
       }
 
@@ -330,7 +342,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } finally {
       setIsScanningMediaStore(false);
     }
-  }, [tracks, showToast]);
+  }, [showToast]);
 
   const toggleFavourite = useCallback(async (trackId: string) => {
     setTracks((prev) =>
@@ -373,6 +385,12 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     },
     [tracks, showToast]
   );
+
+  useEffect(() => {
+    if (isLoading || autoScanStartedRef.current) return;
+    autoScanStartedRef.current = true;
+    void scanDeviceMediaStore({ silent: true, requestPermission: false });
+  }, [isLoading, scanDeviceMediaStore]);
 
   const updateTrackArtwork = useCallback(
     async (trackId: string, imageFile: File) => {
