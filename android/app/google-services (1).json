@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "290444623209",
+    "project_id": "neo-player-android",
+    "storage_bucket": "neo-player-android.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:290444623209:android:86ad5e94636b9568d851f8",
+        "android_client_info": {
+          "package_name": "com.neoplayer.music"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "290444623209-a55ltr1ec8d13ucbnvlhp52ldis78i9h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.neoplayer.music",
+            "certificate_hash": "ace16451fd63677baf96d388ca17fd1cecfa246f"
+          }
+        },
+        {
+          "client_id": "290444623209-dhbnit2vhsqg3t2o5c9qaoodt6s78jm0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.neoplayer.music",
+            "certificate_hash": "b9809e17480eb5d263c14e38218b1e9258af00a7"
+          }
+        },
+        {
+          "client_id": "290444623209-0vo15v3j0vra84ao7lcjb85v27mt9sfh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALZoXxMWJKtLxWiS4aPdlF1UMqEc2-NzA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "290444623209-0vo15v3j0vra84ao7lcjb85v27mt9sfh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
