@@ -49,8 +49,8 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         className={cn(
           'min-h-[44px] min-w-[44px] rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40',
           shuffle
-            ? 'text-[#FF2D55] dark:text-[#FF375F] bg-[#FF2D55]/12'
-            : 'text-[#6E6E73] dark:text-[#98989D] hover:text-[#111216] dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/8'
+            ? 'text-[var(--neo-accent)] bg-[var(--neo-accent-soft)]'
+            : 'text-[#525258] dark:text-[#B8B8BE] hover:text-[#111216] dark:hover:text-white hover:bg-black/8 dark:hover:bg-white/10'
         )}
       >
         <Shuffle className="w-[18px] h-[18px]" />
@@ -61,7 +61,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         onClick={onPrev}
         disabled={disabled}
         aria-label="Previous track"
-        className="min-h-[48px] min-w-[48px] rounded-full flex items-center justify-center text-[#111216] dark:text-white hover:bg-black/6 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+        className="min-h-[48px] min-w-[48px] rounded-full flex items-center justify-center text-[#111216] dark:text-white hover:bg-black/8 dark:hover:bg-white/12 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
       >
         <SkipBack className={cn(isLg ? 'w-7 h-7' : 'w-5 h-5')} fill="currentColor" />
       </button>
@@ -88,7 +88,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         onClick={onNext}
         disabled={disabled}
         aria-label="Next track"
-        className="min-h-[48px] min-w-[48px] rounded-full flex items-center justify-center text-[#111216] dark:text-white hover:bg-black/6 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+        className="min-h-[48px] min-w-[48px] rounded-full flex items-center justify-center text-[#111216] dark:text-white hover:bg-black/8 dark:hover:bg-white/12 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
       >
         <SkipForward className={cn(isLg ? 'w-7 h-7' : 'w-5 h-5')} fill="currentColor" />
       </button>
@@ -101,8 +101,8 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
         className={cn(
           'min-h-[44px] min-w-[44px] rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40',
           repeat !== 'off'
-            ? 'text-[#FF2D55] dark:text-[#FF375F] bg-[#FF2D55]/12'
-            : 'text-[#6E6E73] dark:text-[#98989D] hover:text-[#111216] dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/8'
+            ? 'text-[var(--neo-accent)] bg-[var(--neo-accent-soft)]'
+            : 'text-[#525258] dark:text-[#B8B8BE] hover:text-[#111216] dark:hover:text-white hover:bg-black/8 dark:hover:bg-white/10'
         )}
       >
         {repeat === 'one' ? (

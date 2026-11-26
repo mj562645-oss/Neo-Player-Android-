@@ -42,9 +42,9 @@ export function GlassNavigation<T extends string>({
                   type="button"
                   onClick={() => onSelect(item.id)}
                   className={cn(
-                    'flex items-center gap-3 px-3.5 min-h-[44px] neo-btn-radius text-sm font-medium transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer text-left',
+                    'neo-nav-item flex items-center gap-3 px-3.5 min-h-[44px] neo-btn-radius text-sm font-medium transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer text-left',
                     active
-                      ? 'bg-[var(--neo-accent-soft)] text-[var(--neo-accent)]'
+                      ? 'neo-nav-item-active bg-[var(--neo-accent-soft)] text-[var(--neo-accent)]'
                       : 'text-[#48484A] dark:text-[#AEAEB2] hover:bg-black/5 dark:hover:bg-white/7 hover:text-[#111216] dark:hover:text-white'
                   )}
                 >
@@ -85,7 +85,7 @@ export function GlassNavigation<T extends string>({
                     : 'text-[#6E6E73] dark:text-[#98989D]'
                 )}
               >
-                <div className="relative">
+                <div className={cn('relative flex items-center justify-center transition-all', active && 'neo-mobile-nav-pill')}>
                   <Icon className="w-[21px] h-[21px]" strokeWidth={active ? 2.3 : 1.8} />
                   {item.badge && item.badge > 0 ? (
                     <span className="absolute -top-1 -right-2 min-w-[15px] h-[15px] px-1 rounded-full bg-[var(--neo-accent)] text-white text-[9px] font-mono-tabular font-bold flex items-center justify-center">

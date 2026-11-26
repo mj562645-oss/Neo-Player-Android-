@@ -462,7 +462,7 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <GlassButton
             size="sm"
             disabled={isLoadingLibrary || isLoggingIn}
@@ -472,6 +472,13 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({
               className={cn('w-3.5 h-3.5', (isLoadingLibrary || isLoggingIn) && 'animate-spin')}
             />
             <span>{hasLiveToken ? 'Sync' : 'Sync Live'}</span>
+          </GlassButton>
+          <GlassButton
+            size="sm"
+            disabled={isLoggingIn}
+            onClick={() => void signIn(true)}
+          >
+            <span>Switch Account</span>
           </GlassButton>
           <GlassButton size="sm" variant="ghost" onClick={() => void signOut()}>
             <LogOut className="w-3.5 h-3.5" />

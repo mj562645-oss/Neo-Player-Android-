@@ -86,6 +86,24 @@ export default defineConfig(() => {
         },
       }),
       {
+        name: 'disable-hmr-websocket-client',
+        apply: 'serve',
+        transform(code: string, id: string) {
+          if (id.includes('vite/dist/client/client')) {
+            let next = code.replace(
+              /const transport = normalizeModuleRunnerTransport\(\(\(\) => \{[\s\S]*?\}\)\(\)\);/,
+              'const transport = normalizeModuleRunnerTransport({ async disconnect() {}, send() {} });'
+            );
+            next = next.replace(
+              'transport.connect(createHMRHandler(handleMessage))',
+              'void 0'
+            );
+            return { code: next, map: null };
+          }
+          return null;
+        },
+      },
+      {
         name: 'copy-unbundled-src-assets',
         apply: 'build',
         closeBundle(error?: Error): void {
@@ -121,6 +139,7 @@ export default defineConfig(() => {
     },
     server: {
       hmr: false,
+      ws: false,
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

@@ -131,11 +131,18 @@ async function ensureNativeGoogleSignIn(): Promise<void> {
   }
 }
 
-async function signInWithCapacitorNative(): Promise<{
+async function signInWithCapacitorNative(forceAccountPicker = false): Promise<{
   user: User;
   accessToken: string;
 }> {
   await ensureNativeGoogleSignIn();
+  if (forceAccountPicker) {
+    try {
+      await GoogleSignIn.signOut();
+    } catch {
+      // Ignore if no prior native Google account was cached
+    }
+  }
 
   const nativeResult = await GoogleSignIn.signIn();
   if (!nativeResult.accessToken) {
@@ -282,7 +289,7 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
     isSigningIn = true;
 
     if (isCapacitorNative()) {
-      return await signInWithCapacitorNative();
+      return await signInWithCapacitorNative(forceAccountPicker);
     }
 
     const existingUser = auth.currentUser;
@@ -316,18 +323,14 @@ export async function signInWithYouTube(forceAccountPicker = false): Promise<{
     }
 
     const currentEmail = existingUser?.email || undefined;
-    if (forceAccountPicker) {
+    if (forceAccountPicker || !currentEmail) {
       activeProvider.setCustomParameters({
         prompt: 'select_account',
         include_granted_scopes: 'true',
       });
-    } else if (currentEmail) {
-      activeProvider.setCustomParameters({
-        login_hint: currentEmail,
-        include_granted_scopes: 'true',
-      });
     } else {
       activeProvider.setCustomParameters({
+        login_hint: currentEmail,
         include_granted_scopes: 'true',
       });
     }

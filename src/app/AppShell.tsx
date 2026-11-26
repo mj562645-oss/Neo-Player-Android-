@@ -183,7 +183,10 @@ export const AppShell: React.FC = () => {
 
   const p = settings.personalization;
   const customBgUrl = useArtworkUrl(p.backgroundImageId);
-  const { palette: trackPalette } = useDominantColor(currentTrack?.artworkId);
+  const { palette: trackPalette } = useDominantColor(
+    currentTrack?.artworkId,
+    currentTrack?.artworkUrl
+  );
 
   const activeGradient =
     p.backgroundGradientId === 'custom'

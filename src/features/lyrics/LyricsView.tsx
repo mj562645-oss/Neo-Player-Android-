@@ -19,10 +19,10 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ focusedTrackId }) => {
   useEffect(() => {
     if (focusedTrackId) {
       setSelectedId(focusedTrackId);
-    } else if (currentTrack) {
+    } else if (currentTrack?.id) {
       setSelectedId(currentTrack.id);
     }
-  }, [focusedTrackId, currentTrack]);
+  }, [focusedTrackId, currentTrack?.id]);
 
   const availableTracks = React.useMemo(() => {
     if (currentTrack && !tracks.some((t) => t.id === currentTrack.id)) {

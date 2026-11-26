@@ -87,11 +87,60 @@
   box-shadow: var(--neo-glass-shadow);
 }
 
-[data-ui-theme="ios"] *,
-[data-ui-theme="material"] *,
-[data-ui-theme="windows"] * {
+[data-ui-theme="material"] *:not(.neo-artwork-backdrop-blur),
+[data-ui-theme="windows"] *:not(.neo-artwork-backdrop-blur) {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+/* Google Material Design 3 navigation & control style */
+[data-ui-theme="material"] .neo-nav-item-active {
+  border-radius: 9999px;
+  background-color: var(--neo-m3-primary-container) !important;
+  color: var(--neo-m3-on-primary-container) !important;
+  font-weight: 600;
+}
+
+[data-ui-theme="material"] .neo-mobile-nav-pill {
+  padding: 4px 16px;
+  border-radius: 9999px;
+  background-color: var(--neo-m3-primary-container);
+  color: var(--neo-m3-on-primary-container);
+}
+
+/* Windows 11 Fluent / WinUI 3 navigation indicator bar & crisp fills */
+[data-ui-theme="windows"] .neo-nav-item-active {
+  position: relative;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.045) !important;
+  color: #1A1A1A !important;
+}
+
+.dark[data-ui-theme="windows"] .neo-nav-item-active {
+  background-color: rgba(255, 255, 255, 0.065) !important;
+  color: #FFFFFF !important;
+}
+
+[data-ui-theme="windows"] .neo-nav-item-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 9999px;
+  background-color: var(--neo-accent);
+}
+
+[data-ui-theme="windows"] .neo-mobile-nav-pill {
+  position: relative;
+  padding: 4px 14px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.dark[data-ui-theme="windows"] .neo-mobile-nav-pill {
+  background-color: rgba(255, 255, 255, 0.075);
 }
 
 .neo-card-radius {

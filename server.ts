@@ -455,6 +455,71 @@ async function createApp() {
     res.json({ ok: true, service: 'neo-player' });
   });
 
+  app.get('/privacy', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neo Player — Privacy Policy &amp; Google API Limited Use</title>
+  <style>
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; max-width: 740px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #18181b; background: #fafafa; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.15rem; margin-top: 1.75rem; }
+    .meta { color: #52525b; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; padding: 18px 20px; margin: 16px 0; }
+    a { color: #2563eb; }
+  </style>
+</head>
+<body>
+  <h1>Neo Player Privacy Policy</h1>
+  <p class="meta">Effective Date: November 2026 &middot; Application: Neo Player</p>
+  <div class="card">
+    <strong>Summary:</strong> Neo Player stores your local audio library, artwork, playlists, lyrics, and personalization preferences on your own device using IndexedDB and native Android device storage. When you optionally connect a Google account, Neo Player requests strictly read-only YouTube access (<code>https://www.googleapis.com/auth/youtube.readonly</code>) solely inside your client session to display and stream your playlists, liked music, and subscriptions.
+  </div>
+  <h2>1. Google Account &amp; YouTube Data Access</h2>
+  <ul>
+    <li><strong>Multi-User Sign-In:</strong> Any Google account user may sign in, switch accounts, or disconnect at any time.</li>
+    <li><strong>Scope Used:</strong> <code>youtube.readonly</code> only. Neo Player never modifies, deletes, uploads, or posts content to your YouTube or Google account.</li>
+    <li><strong>Storage &amp; Sharing:</strong> OAuth access tokens remain in client memory during active sessions and are never sold, shared with advertisers, or transmitted to unrelated third-party servers.</li>
+  </ul>
+  <h2>2. Google API Services User Data Policy (Limited Use)</h2>
+  <p>Neo Player&rsquo;s use and transfer to any other app of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+  <h2>3. Local Audio Files &amp; Revoking Access</h2>
+  <p>You can clear cached application data or disconnect your Google account anytime inside <strong>Settings &rarr; Google &amp; YouTube Account</strong>, or revoke permissions directly in your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google Account Permissions</a> page.</p>
+</body>
+</html>`);
+  });
+
+  app.get('/terms', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neo Player — Terms of Service</title>
+  <style>
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; max-width: 740px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #18181b; background: #fafafa; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.15rem; margin-top: 1.75rem; }
+    .meta { color: #52525b; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Neo Player Terms of Service</h1>
+  <p class="meta">Effective Date: November 2026 &middot; Application: Neo Player</p>
+  <h2>1. Acceptable Use</h2>
+  <p>Neo Player is a personal media player for local audio files owned or licensed by the user and optional authorized YouTube playback via official YouTube APIs and embedded IFrame Player.</p>
+  <h2>2. Third-Party Services</h2>
+  <p>Optional YouTube integration is governed by the YouTube Terms of Service and Google Privacy Policy. Users may connect or disconnect their Google account at their discretion.</p>
+  <h2>3. Disclaimer</h2>
+  <p>Neo Player is provided on an &ldquo;as is&rdquo; basis. Always keep backups of irreplaceable audio files prior to editing embedded file tags.</p>
+</body>
+</html>`);
+  });
+
   app.get('/api/discovery/trending', async (req, res) => {
     try {
       const country = sanitizeCountry(req.query.country);
@@ -641,7 +706,7 @@ async function createApp() {
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);

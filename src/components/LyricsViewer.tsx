@@ -61,19 +61,27 @@ export const LyricsViewer: React.FC<LyricsViewerProps> = ({
   const rafAnimRef = useRef<number | null>(null);
   const programmaticScrollRef = useRef(false);
   const autoFetchedIdsRef = useRef<Set<string>>(new Set());
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
 
   const doc = track ? lyricsMap[track.id] : undefined;
   const isTrackCurrentlyPlaying = Boolean(track && currentTrack && track.id === currentTrack.id);
 
-  // Sync draft & reset search state on track or saved lyrics change
+  // Reset UI drawer/edit states only when switching to a different track
   useEffect(() => {
     setEditing(false);
+    editingRef.current = false;
     setSearchOpen(false);
     setCandidates(null);
     setUserScrolling(false);
     if (track) {
       setSearchQuery(extractSearchHints(track).combinedQuery);
     }
+  }, [track?.id]);
+
+  // Sync editor draft with saved lyrics unless the user is actively typing
+  useEffect(() => {
+    if (editingRef.current) return;
     if (doc) {
       setDraft(
         doc.type === 'synced'

@@ -383,7 +383,11 @@ public class MediaStorePlugin extends Plugin {
                 setTagField(tag, FieldKey.YEAR, jsonString(tags, "year"));
                 setTagField(tag, FieldKey.TRACK, jsonString(tags, "trackNumber"));
                 if (tags.has("mood")) {
-                    setTagField(tag, FieldKey.MOOD, jsonString(tags, "mood"));
+                    try {
+                        setTagField(tag, FieldKey.MOOD, jsonString(tags, "mood"));
+                    } catch (Exception ignored) {
+                        // Some tag formats (e.g. ID3v2.3 / WAV) may omit native MOOD frame support
+                    }
                 }
                 if (call.getBoolean("removeArtwork", false)) {
                     tag.deleteArtworkField();
@@ -453,9 +457,15 @@ public class MediaStorePlugin extends Plugin {
     }
 
     private static void writeFileToUri(ContentResolver resolver, Uri uri, File source) throws Exception {
+        OutputStream rawOut;
+        try {
+            rawOut = resolver.openOutputStream(uri, "rwt");
+        } catch (Exception firstError) {
+            rawOut = resolver.openOutputStream(uri, "wt");
+        }
         try (
             InputStream input = new java.io.FileInputStream(source);
-            OutputStream output = resolver.openOutputStream(uri, "rwt")
+            OutputStream output = rawOut
         ) {
             if (output == null) throw new IllegalStateException("Unable to write the selected audio file.");
             byte[] buffer = new byte[32 * 1024];
@@ -498,6 +508,15 @@ public class MediaStorePlugin extends Plugin {
             item.put("fileSize", getFileSize(resolver, uri));
             item.put("format", detectFormat(fileName, mimeType));
             item.put("addedAt", System.currentTimeMillis());
+            try {
+                byte[] picture = retriever.getEmbeddedPicture();
+                if (picture != null && picture.length > 0) {
+                    item.put("artworkBase64", Base64.encodeToString(picture, Base64.NO_WRAP));
+                    item.put("artworkMimeType", "image/jpeg");
+                }
+            } catch (Exception ignored) {
+                // Ignore if embedded artwork cannot be decoded
+            }
             return item;
         } finally {
             retriever.release();

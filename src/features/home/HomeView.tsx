@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ChevronRight,
   Heart,
@@ -26,6 +26,7 @@ import { GlassCard } from '../../components/glass/GlassCard';
 import { PlaylistCard } from '../../components/PlaylistCard';
 import { TrackRow } from '../../components/TrackRow';
 import { ImportDropzone } from '../library/ImportDropzone';
+import { TrackMetadataModal } from '../library/TrackMetadataModal';
 
 interface HomeViewProps {
   onNavigate: (section: AppSection, libraryTab?: LibrarySubTab) => void;
@@ -48,6 +49,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
     toggleFavourite,
     createPlaylist,
     generateSmartMixes,
+    addTracksToPlaylist,
+    deleteTracks,
+    enrichTrack,
+    downloadLyricsForTrack,
   } = useLibrary();
   const { trendingTracks, artistUpdates, unreadCount, playDiscoveryTrack, tuneInToTrending } =
     useDiscovery();
@@ -63,6 +68,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     loadPlaylistTracks,
   } = useYouTube();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const hasNativeMediaStore = isNativeMediaStoreAvailable();
   const handleImportClick = () => {
     if (hasNativeMediaStore) {
@@ -180,6 +186,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           >
             <AlbumArtwork
               artworkId={continueTrack.artworkId}
+              artworkUrl={continueTrack.artworkUrl}
               alt={continueTrack.title}
               fallbackSeed={`${continueTrack.album}-${continueTrack.artist}`}
               size="lg"
@@ -285,7 +292,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onToggleFavourite={() => void toggleFavourite(track.id)}
                 onPlayNext={() => playNextInQueue(track)}
                 onAddToQueue={() => addToQueue(track)}
+                onAddToPlaylist={(plId) => void addTracksToPlaylist(plId, [track.id])}
+                onEditMetadata={() => setEditingTrack(track)}
+                onAutoEnrich={() => void enrichTrack(track.id)}
+                onDownloadLyrics={() => void downloadLyricsForTrack(track.id)}
                 onOpenLyrics={() => onOpenLyricsForTrack(track.id)}
+                onDelete={() => void deleteTracks([track.id])}
               />
             ))}
           </GlassCard>
@@ -533,6 +545,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           })}
         </div>
       </section>
+      <TrackMetadataModal
+        track={editingTrack}
+        open={Boolean(editingTrack)}
+        onOpenChange={(open) => {
+          if (!open) setEditingTrack(null);
+        }}
+      />
     </div>
   );
 };
@@ -566,6 +585,7 @@ const TrackSquareCard: React.FC<{
     <div className="relative aspect-square w-full">
       <AlbumArtwork
         artworkId={track.artworkId}
+        artworkUrl={track.artworkUrl}
         alt={track.title}
         fallbackSeed={`${track.album}-${track.artist}`}
         size="fill"

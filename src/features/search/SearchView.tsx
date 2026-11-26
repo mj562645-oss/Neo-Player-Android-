@@ -25,6 +25,7 @@ import { GlassCard } from '../../components/glass/GlassCard';
 import { PlaylistCard } from '../../components/PlaylistCard';
 import { TrackRow } from '../../components/TrackRow';
 import { YouTubeErrorBanner } from '../../components/YouTubeErrorBanner';
+import { TrackMetadataModal } from '../library/TrackMetadataModal';
 
 type SearchScope = 'all' | 'youtube' | 'local';
 
@@ -37,8 +38,17 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onOpenPlaylist,
   onOpenLyricsForTrack,
 }) => {
-  const { tracks, albums, artists, playlists, toggleFavourite, addTracksToPlaylist, deleteTracks } =
-    useLibrary();
+  const {
+    tracks,
+    albums,
+    artists,
+    playlists,
+    toggleFavourite,
+    addTracksToPlaylist,
+    deleteTracks,
+    enrichTrack,
+    downloadLyricsForTrack,
+  } = useLibrary();
   const { currentTrack, isPlaying, playTrack, playNextInQueue, addToQueue, toggleTrackLike } =
     usePlayer();
   const { settings } = useTheme();
@@ -62,6 +72,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   const [query, setQuery] = useState(() => ytStoredQuery || '');
   const [scope, setScope] = useState<SearchScope>('all');
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const pendingQueryAfterAuthRef = useRef<string | null>(null);
 
   const trimmed = query.trim();
@@ -475,6 +486,9 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     onPlayNext={() => playNextInQueue(track)}
                     onAddToQueue={() => addToQueue(track)}
                     onAddToPlaylist={(plId) => void addTracksToPlaylist(plId, [track.id])}
+                    onEditMetadata={() => setEditingTrack(track)}
+                    onAutoEnrich={() => void enrichTrack(track.id)}
+                    onDownloadLyrics={() => void downloadLyricsForTrack(track.id)}
                     onOpenLyrics={() => onOpenLyricsForTrack(track.id)}
                     onDelete={() => void deleteTracks([track.id])}
                   />
@@ -686,6 +700,13 @@ export const SearchView: React.FC<SearchViewProps> = ({
           )}
         </div>
       )}
+      <TrackMetadataModal
+        track={editingTrack}
+        open={Boolean(editingTrack)}
+        onOpenChange={(open) => {
+          if (!open) setEditingTrack(null);
+        }}
+      />
     </div>
   );
 };

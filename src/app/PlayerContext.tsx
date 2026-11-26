@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { resolveArtworkDataUrl } from '../lib/mediaSession';
 import { createId } from '../lib/utils';
 import { syncScreenWakeLock, triggerHaptic } from '../services/androidPlatform';
 import { audioEngine } from '../services/audioEngine';
@@ -80,6 +81,18 @@ function getNativePlaybackUri(track?: Track | null): string | null {
   return null;
 }
 
+async function resolveTrackArtworkBase64(track?: Track | null): Promise<string | undefined> {
+  if (!track?.artworkId) return undefined;
+  try {
+    const dataUrl = await resolveArtworkDataUrl(track.artworkId);
+    if (!dataUrl) return undefined;
+    const commaIdx = dataUrl.indexOf(',');
+    return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
     tracks,
@@ -89,7 +102,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     toggleFavourite,
   } = useLibrary();
   const { isYouTubeTrackLiked, toggleYouTubeLike } = useYouTube();
-  const { settings, settingsLoaded } = useTheme();
+  const { settings, settingsLoaded, updateSettings } = useTheme();
   const { showToast } = useToast();
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -110,6 +123,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const hydratedRef = useRef(false);
   const lastSavedPosRef = useRef(0);
   const currentTrackRef = useRef<Track | null>(null);
+  const currentTrackIdRef = useRef<string | null>(currentTrackId);
+  currentTrackIdRef.current = currentTrackId;
+  const tracksRef = useRef<Track[]>(tracks);
+  tracksRef.current = tracks;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const currentTimeRef = useRef(currentTime);
   currentTimeRef.current = currentTime;
   const sleepTimerModeRef = useRef<SleepTimerMode>('off');
@@ -118,6 +137,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   crossfadeSecondsRef.current = Math.max(0, Math.min(12, settings.crossfadeSeconds ?? 0));
   const queueRef = useRef<QueueItem[]>(queue);
   queueRef.current = queue;
+  const originalQueueOrderRef = useRef<QueueItem[]>(originalQueueOrder);
+  originalQueueOrderRef.current = originalQueueOrder;
+  const shuffleRef = useRef<boolean>(shuffle);
+  shuffleRef.current = shuffle;
   const currentIndexRef = useRef<number>(currentIndex);
   currentIndexRef.current = currentIndex;
   const repeatRef = useRef<RepeatMode>(repeat);
@@ -152,6 +175,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return map;
   }, [tracks, externalTrackMap, isYouTubeTrackLiked]);
 
+  const trackByIdRef = useRef(trackById);
+  trackByIdRef.current = trackById;
+
   const currentTrack = useMemo(
     () => (currentTrackId ? trackById.get(currentTrackId) || null : null),
     [currentTrackId, trackById]
@@ -163,14 +189,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const toggleTrackLike = useCallback(
     async (track: Track) => {
-      void triggerHaptic(settings.hapticFeedback, 'light');
+      void triggerHaptic(settingsRef.current.hapticFeedback, 'light');
       if (isYouTubeTrack(track) || track.source === 'youtube') {
         toggleYouTubeLike(track);
       } else {
         await toggleFavourite(track.id);
       }
     },
-    [settings.hapticFeedback, toggleYouTubeLike, toggleFavourite]
+    [toggleYouTubeLike, toggleFavourite]
   );
 
   const getActivePosition = useCallback(() => {
@@ -180,25 +206,48 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return audioEngine.getCurrentTime();
   }, []);
 
-  // Persist playback state helper (only persist local library queue across restarts)
+  // Persist playback state helper (always reads fresh refs so listeners stay stable)
   const persistState = useCallback(
     (patch: Partial<PlaybackState>) => {
       const state: PlaybackState = {
         ...DEFAULT_PLAYBACK_STATE,
-        currentTrackId,
-        queue,
-        originalQueueOrder,
-        currentIndex,
+        currentTrackId: currentTrackIdRef.current,
+        queue: queueRef.current,
+        originalQueueOrder: originalQueueOrderRef.current,
+        currentIndex: currentIndexRef.current,
         position: getActivePosition(),
-        shuffle,
-        repeat,
+        shuffle: shuffleRef.current,
+        repeat: repeatRef.current,
         ...patch,
         id: 'playback_state',
         updatedAt: Date.now(),
       };
       void db.putPlaybackState(state);
     },
-    [currentTrackId, queue, originalQueueOrder, currentIndex, shuffle, repeat, getActivePosition]
+    [getActivePosition]
+  );
+
+  const playNativeTrack = useCallback(
+    async (targetTrack: Track, startPosSec: number, autoplay: boolean) => {
+      const nativeUri = getNativePlaybackUri(targetTrack);
+      if (!nativeUri || !isNativeAudioAvailable()) return;
+      const syncMeta = settingsRef.current.bluetoothMetadataSync ?? true;
+      const artworkBase64 = syncMeta ? await resolveTrackArtworkBase64(targetTrack) : undefined;
+      await NativeAudio.playLocal({
+        uri: nativeUri,
+        title: syncMeta ? targetTrack.title : 'Neo Player',
+        artist: syncMeta ? targetTrack.artist : 'Audio Playback',
+        album: syncMeta ? targetTrack.album : '',
+        artworkBase64,
+        positionMs: Math.max(0, startPosSec) * 1000,
+        autoplay,
+        volume: settingsRef.current.volume,
+        muted: settingsRef.current.muted,
+        playbackRate: settingsRef.current.playbackRate,
+        pauseOnBluetoothDisconnect: settingsRef.current.pauseOnBluetoothDisconnect ?? true,
+      });
+    },
+    []
   );
 
   // Hydrate saved playback state once library & settings load
@@ -207,8 +256,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     hydratedRef.current = true;
 
     db.getPlaybackState().then(async (saved) => {
-      if (!settings.resumeOnLaunch) return;
-      const validIds = new Set(tracks.map((t) => t.id));
+      if (!settingsRef.current.resumeOnLaunch) return;
+      const validIds = new Set(tracksRef.current.map((t) => t.id));
       const cleanQueue = saved.queue.filter((q) => validIds.has(q.trackId));
       const cleanOrig = saved.originalQueueOrder.filter((q) => validIds.has(q.trackId));
       setShuffle(saved.shuffle);
@@ -221,7 +270,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           saved.currentIndex >= 0 && saved.currentIndex < cleanQueue.length
             ? saved.currentIndex
             : 0;
-        const targetTrack = trackById.get(cleanQueue[idx].trackId);
+        const targetTrack = trackByIdRef.current.get(cleanQueue[idx].trackId);
         if (targetTrack && !isYouTubeTrack(targetTrack)) {
           setCurrentIndex(idx);
           setCurrentTrackId(targetTrack.id);
@@ -229,20 +278,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setDuration(targetTrack.duration || 0);
           const nativeUri = getNativePlaybackUri(targetTrack);
           if (isNativeAudioAvailable() && nativeUri) {
-            await NativeAudio.playLocal({
-              uri: nativeUri,
-              title: targetTrack.title,
-              artist: targetTrack.artist,
-              positionMs: (saved.position || 0) * 1000,
-            });
-            await NativeAudio.pause();
+            await playNativeTrack(targetTrack, saved.position || 0, false);
           } else {
             await audioEngine.loadTrack(targetTrack, saved.position || 0, false);
           }
         }
       }
     });
-  }, [libraryLoading, settingsLoaded, settings.resumeOnLaunch, tracks, trackById]);
+  }, [libraryLoading, settingsLoaded, playNativeTrack]);
 
   // Clean queue if local tracks are deleted from library (preserve YouTube tracks in queue)
   useEffect(() => {
@@ -257,6 +300,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (currentTrackId && !isTrackValid(currentTrackId)) {
         audioEngine.unload();
         youtubePlayer.unload();
+        if (isNativeAudioAvailable()) void NativeAudio.stop();
         setCurrentTrackId(null);
         setCurrentIndex(-1);
         setIsPlaying(false);
@@ -271,6 +315,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const startTrackAt = useCallback(
     async (targetTrack: Track, indexInQueue: number, startPos = 0) => {
       crossfadeTriggeredKeyRef.current = null;
+      nativeEndedTrackRef.current = null;
       setCurrentTrackId(targetTrack.id);
       setCurrentIndex(indexInQueue);
       setDuration(targetTrack.duration || 0);
@@ -290,12 +335,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const nativeUri = getNativePlaybackUri(targetTrack);
         if (isNativeAudioAvailable() && nativeUri) {
           audioEngine.pause();
-          await NativeAudio.playLocal({
-            uri: nativeUri,
-            title: targetTrack.title,
-            artist: targetTrack.artist,
-            positionMs: startPos * 1000,
-          });
+          await playNativeTrack(targetTrack, startPos, true);
           setIsPlaying(true);
           void recordTrackPlay(targetTrack.id);
         } else {
@@ -307,15 +347,53 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     },
-    [recordTrackPlay]
+    [playNativeTrack, recordTrackPlay]
   );
+
+  // Sync metadata / artwork edits immediately to the active OS notification & Bluetooth AVRCP
+  useEffect(() => {
+    if (!currentTrack) return;
+    const syncMeta = settings.bluetoothMetadataSync ?? true;
+    if (isYouTubeTrack(currentTrack)) {
+      youtubePlayer.refreshMetadata(currentTrack);
+      return;
+    }
+    const nativeUri = getNativePlaybackUri(currentTrack);
+    if (isNativeAudioAvailable() && nativeUri) {
+      if (!syncMeta) {
+        void NativeAudio.updateMetadata({
+          title: 'Neo Player',
+          artist: 'Audio Playback',
+          album: '',
+        });
+        return;
+      }
+      void resolveTrackArtworkBase64(currentTrack).then((artworkBase64) =>
+        NativeAudio.updateMetadata({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          album: currentTrack.album,
+          artworkBase64,
+        })
+      );
+      return;
+    }
+    audioEngine.refreshMetadata(currentTrack);
+  }, [
+    currentTrack?.id,
+    currentTrack?.title,
+    currentTrack?.artist,
+    currentTrack?.album,
+    currentTrack?.artworkId,
+    settings.bluetoothMetadataSync,
+  ]);
 
   const transitionToQueueIndexWithCrossfade = useCallback(
     async (indexInQueue: number, fadeSeconds: number) => {
       const q = queueRef.current;
       if (indexInQueue < 0 || indexInQueue >= q.length) return;
       const item = q[indexInQueue];
-      const targetTrack = trackById.get(item.trackId);
+      const targetTrack = trackByIdRef.current.get(item.trackId);
       if (!targetTrack) return;
 
       const outgoingTrack = currentTrackRef.current;
@@ -365,7 +443,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       }
     },
-    [trackById, persistState, recordTrackPlay, startTrackAt]
+    [persistState, recordTrackPlay, startTrackAt]
   );
 
   const playTrack = useCallback(
@@ -383,7 +461,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const clickedIdx = list.findIndex((t) => t.id === track.id);
       const safeIdx = clickedIdx >= 0 ? clickedIdx : 0;
 
-      if (shuffle && baseQueue.length > 1) {
+      if (shuffleRef.current && baseQueue.length > 1) {
         const clickedItem = baseQueue[safeIdx];
         const rest = baseQueue.filter((_, i) => i !== safeIdx);
         const shuffledQueue = [clickedItem, ...shuffleArray(rest)];
@@ -410,58 +488,132 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       }
     },
-    [shuffle, registerExternalTracks, startTrackAt, persistState]
+    [registerExternalTracks, startTrackAt, persistState]
   );
 
   const playQueueIndex = useCallback(
     async (index: number) => {
-      if (index < 0 || index >= queue.length) return;
-      const item = queue[index];
-      const target = trackById.get(item.trackId);
+      const q = queueRef.current;
+      if (index < 0 || index >= q.length) return;
+      const item = q[index];
+      const target = trackByIdRef.current.get(item.trackId);
       if (!target) return;
       await startTrackAt(target, index, 0);
       persistState({ currentTrackId: target.id, currentIndex: index, position: 0 });
     },
-    [queue, trackById, startTrackAt, persistState]
+    [startTrackAt, persistState]
   );
 
   useEffect(() => {
     void syncScreenWakeLock(isPlaying && settings.keepScreenAwake);
   }, [isPlaying, settings.keepScreenAwake]);
 
-  const togglePlay = useCallback(async () => {
-    void triggerHaptic(settings.hapticFeedback, 'light');
-    if (!currentTrack) {
-      if (tracks.length > 0) {
-        await playTrack(tracks[0], tracks, 'Library');
+  const playActive = useCallback(async () => {
+    const activeTrack = currentTrackRef.current;
+    if (!activeTrack) {
+      const libraryTracks = tracksRef.current;
+      if (libraryTracks.length > 0) {
+        await playTrack(libraryTracks[0], libraryTracks, 'Library');
       }
       return;
     }
 
-    if (isYouTubeTrack(currentTrack)) {
+    if (isYouTubeTrack(activeTrack)) {
+      audioEngine.pause();
+      if (!youtubePlayer.isPlaying()) {
+        const ok = youtubePlayer.play();
+        if (!ok) {
+          await youtubePlayer.loadTrack(activeTrack, currentTimeRef.current, true);
+        }
+      }
+      return;
+    }
+
+    const nativeUri = getNativePlaybackUri(activeTrack);
+    if (isNativeAudioAvailable() && nativeUri) {
+      youtubePlayer.pause();
+      audioEngine.pause();
+      const status = await NativeAudio.getStatus();
+      if (status.durationMs > 0) {
+        await NativeAudio.resume();
+      } else {
+        await playNativeTrack(activeTrack, currentTimeRef.current, true);
+      }
+      setIsPlaying(true);
+      return;
+    }
+
+    youtubePlayer.pause();
+    const ok = await audioEngine.play();
+    if (!ok) {
+      await audioEngine.loadTrack(activeTrack, currentTimeRef.current, true);
+    }
+  }, [playNativeTrack, playTrack]);
+
+  const pauseActive = useCallback(() => {
+    const activeTrack = currentTrackRef.current;
+    if (isYouTubeTrack(activeTrack)) {
+      youtubePlayer.pause();
+    } else if (isNativeAudioAvailable() && getNativePlaybackUri(activeTrack)) {
+      void NativeAudio.pause();
+      setIsPlaying(false);
+    } else {
+      audioEngine.pause();
+    }
+  }, []);
+
+  // Auto-pause on Web/PWA when Bluetooth or wired audio output disconnects
+  useEffect(() => {
+    return audioEngine.onOutputDeviceDisconnected(({ selectedDeviceRemoved }) => {
+      if (selectedDeviceRemoved) {
+        void updateSettings({ audioOutputDeviceId: '' });
+      }
+      if (!settingsRef.current.pauseOnBluetoothDisconnect) return;
+      const activeTrack = currentTrackRef.current;
+      const isNativeTrack =
+        Boolean(activeTrack) && isNativeAudioAvailable() && Boolean(getNativePlaybackUri(activeTrack));
+      if (!isNativeTrack && isPlayingRef.current) {
+        pauseActive();
+        showToast('Audio output disconnected — playback paused', 'info');
+      }
+    });
+  }, [pauseActive, showToast, updateSettings]);
+
+  const togglePlay = useCallback(async () => {
+    void triggerHaptic(settingsRef.current.hapticFeedback, 'light');
+    const activeTrack = currentTrackRef.current;
+    if (!activeTrack) {
+      const libraryTracks = tracksRef.current;
+      if (libraryTracks.length > 0) {
+        await playTrack(libraryTracks[0], libraryTracks, 'Library');
+      }
+      return;
+    }
+
+    if (isYouTubeTrack(activeTrack)) {
       if (youtubePlayer.isPlaying()) {
         youtubePlayer.pause();
       } else {
         audioEngine.pause();
         const ok = youtubePlayer.play();
         if (!ok) {
-          await youtubePlayer.loadTrack(currentTrack, currentTime, true);
+          await youtubePlayer.loadTrack(activeTrack, currentTimeRef.current, true);
         }
       }
       return;
     }
 
-    const nativeUri = getNativePlaybackUri(currentTrack);
+    const nativeUri = getNativePlaybackUri(activeTrack);
     if (isNativeAudioAvailable() && nativeUri) {
       const status = await NativeAudio.getStatus();
-      if (status.isPlaying) { await NativeAudio.pause(); setIsPlaying(false); }
-      else {
-        await NativeAudio.playLocal({
-          uri: nativeUri,
-          title: currentTrack.title,
-          artist: currentTrack.artist,
-          positionMs: currentTime * 1000,
-        });
+      if (status.isPlaying) {
+        await NativeAudio.pause();
+        setIsPlaying(false);
+      } else if (status.durationMs > 0) {
+        await NativeAudio.resume();
+        setIsPlaying(true);
+      } else {
+        await playNativeTrack(activeTrack, currentTimeRef.current, true);
         setIsPlaying(true);
       }
     } else if (audioEngine.isPlaying()) {
@@ -469,18 +621,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } else {
       youtubePlayer.pause();
       const ok = await audioEngine.play();
-      if (!ok) await audioEngine.loadTrack(currentTrack, currentTime, true);
+      if (!ok) await audioEngine.loadTrack(activeTrack, currentTimeRef.current, true);
     }
-  }, [currentTrack, tracks, playTrack, currentTime, settings.hapticFeedback]);
-
-  const pauseActive = useCallback(() => {
-    if (isYouTubeTrack(currentTrackRef.current)) {
-      youtubePlayer.pause();
-    } else {
-      if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) void NativeAudio.pause();
-      else audioEngine.pause();
-    }
-  }, []);
+  }, [playNativeTrack, playTrack]);
 
   const setSleepTimer = useCallback(
     (mode: SleepTimerMode) => {
@@ -517,11 +660,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [sleepTimerMode, pauseActive, showToast]);
 
   const nextTrack = useCallback(async () => {
-    void triggerHaptic(settings.hapticFeedback, 'light');
-    if (queue.length === 0) return;
-    if (currentIndex + 1 < queue.length) {
-      await playQueueIndex(currentIndex + 1);
-    } else if (repeat === 'all') {
+    void triggerHaptic(settingsRef.current.hapticFeedback, 'light');
+    const q = queueRef.current;
+    const idx = currentIndexRef.current;
+    const rep = repeatRef.current;
+    if (q.length === 0) return;
+    if (idx + 1 < q.length) {
+      await playQueueIndex(idx + 1);
+    } else if (rep === 'all') {
       await playQueueIndex(0);
     } else {
       if (isYouTubeTrack(currentTrackRef.current)) {
@@ -534,9 +680,113 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         audioEngine.pause();
         audioEngine.seek(0);
       }
+      setIsPlaying(false);
       setCurrentTime(0);
     }
-  }, [queue.length, currentIndex, repeat, playQueueIndex, settings.hapticFeedback]);
+  }, [playQueueIndex]);
+
+  const prevTrack = useCallback(async () => {
+    const q = queueRef.current;
+    const idx = currentIndexRef.current;
+    const rep = repeatRef.current;
+    if (q.length === 0) return;
+    const ct = getActivePosition();
+    if (ct > 3) {
+      if (isYouTubeTrack(currentTrackRef.current)) {
+        youtubePlayer.seek(0);
+      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+        void NativeAudio.seek({ positionMs: 0 });
+      } else {
+        audioEngine.seek(0);
+      }
+      setCurrentTime(0);
+      return;
+    }
+    if (idx > 0) {
+      await playQueueIndex(idx - 1);
+    } else if (rep === 'all') {
+      await playQueueIndex(q.length - 1);
+    } else {
+      if (isYouTubeTrack(currentTrackRef.current)) {
+        youtubePlayer.seek(0);
+      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
+        void NativeAudio.seek({ positionMs: 0 });
+      } else {
+        audioEngine.seek(0);
+      }
+      setCurrentTime(0);
+    }
+  }, [playQueueIndex, getActivePosition]);
+
+  const handleNativeTrackEnded = useCallback(async () => {
+    const activeTrack = currentTrackRef.current;
+    if (!activeTrack) return;
+    const endKey = `${activeTrack.id}:${currentIndexRef.current}`;
+    if (nativeEndedTrackRef.current === endKey) return;
+    nativeEndedTrackRef.current = endKey;
+
+    if (sleepTimerModeRef.current === 'end_of_track') {
+      setSleepTimerMode('off');
+      setSleepRemainingSeconds(null);
+      await NativeAudio.pause();
+      setIsPlaying(false);
+      showToast('Sleep timer paused at end of track', 'info');
+      return;
+    }
+    if (repeatRef.current === 'one') {
+      nativeEndedTrackRef.current = null;
+      await NativeAudio.seek({ positionMs: 0 });
+      await NativeAudio.resume();
+      setIsPlaying(true);
+      return;
+    }
+    await nextTrack();
+  }, [nextTrack, showToast]);
+
+  // Native Android Media3 event listeners + resilient fallback status poller
+  useEffect(() => {
+    if (!isNativeAudioAvailable()) return;
+    let active = true;
+    const handleMedia = NativeAudio.addListener('mediaAction', ({ action }) => {
+      if (!active) return;
+      if (action === 'play') {
+        void playActive();
+      } else if (action === 'pause') {
+        pauseActive();
+      } else if (action === 'next') {
+        void nextTrack();
+      } else if (action === 'previous') {
+        void prevTrack();
+      } else if (action === 'ended') {
+        void handleNativeTrackEnded();
+      }
+    });
+    const handleState = NativeAudio.addListener('playbackState', (ev) => {
+      if (!active) return;
+      const activeTrack = currentTrackRef.current;
+      if (!activeTrack || !getNativePlaybackUri(activeTrack)) return;
+      setIsPlaying(ev.isPlaying);
+      if (ev.positionMs >= 0) {
+        const sec = ev.positionMs / 1000;
+        setCurrentTime(sec);
+        if (Math.abs(sec - lastSavedPosRef.current) >= 5) {
+          lastSavedPosRef.current = sec;
+          void saveTrackPosition(activeTrack.id, sec);
+          persistState({ position: sec });
+        }
+      }
+      if (ev.durationMs > 0) setDuration(ev.durationMs / 1000);
+      if (ev.ended) {
+        void handleNativeTrackEnded();
+      }
+    });
+
+    return () => {
+      active = false;
+      void handleMedia.then((sub) => sub.remove());
+      void handleState.then((sub) => sub.remove());
+    };
+  }, [playActive, pauseActive, nextTrack, prevTrack, handleNativeTrackEnded, saveTrackPosition, persistState]);
 
   useEffect(() => {
     if (!currentTrack || !isNativeAudioAvailable() || !getNativePlaybackUri(currentTrack)) return;
@@ -546,16 +796,23 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const status = await NativeAudio.getStatus();
         if (!active) return;
         setIsPlaying(status.isPlaying);
-        if (status.positionMs >= 0) setCurrentTime(status.positionMs / 1000);
+        if (status.positionMs >= 0) {
+          const sec = status.positionMs / 1000;
+          setCurrentTime(sec);
+          if (Math.abs(sec - lastSavedPosRef.current) >= 5) {
+            lastSavedPosRef.current = sec;
+            void saveTrackPosition(currentTrack.id, sec);
+            persistState({ position: sec });
+          }
+        }
         if (status.durationMs > 0) setDuration(status.durationMs / 1000);
         if (
-          !status.isPlaying &&
-          status.durationMs > 0 &&
-          status.positionMs >= status.durationMs &&
-          nativeEndedTrackRef.current !== currentTrack.id
+          status.ended ||
+          (!status.isPlaying &&
+            status.durationMs > 0 &&
+            status.positionMs >= status.durationMs - 250)
         ) {
-          nativeEndedTrackRef.current = currentTrack.id;
-          await nextTrack();
+          await handleNativeTrackEnded();
         }
       } catch (error) {
         console.warn('[Neo Player] Native playback status unavailable', error);
@@ -572,42 +829,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     currentTrack?.nativeAudioUri,
     currentTrack?.contentUri,
     currentTrack?.source,
-    nextTrack,
+    handleNativeTrackEnded,
+    saveTrackPosition,
+    persistState,
   ]);
-
-  const prevTrack = useCallback(async () => {
-    if (queue.length === 0) return;
-    const ct = getActivePosition();
-    if (ct > 3) {
-      if (isYouTubeTrack(currentTrackRef.current)) {
-        youtubePlayer.seek(0);
-      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
-        void NativeAudio.seek({ positionMs: 0 });
-      } else {
-        audioEngine.seek(0);
-      }
-      setCurrentTime(0);
-      return;
-    }
-    if (currentIndex > 0) {
-      await playQueueIndex(currentIndex - 1);
-    } else if (repeat === 'all') {
-      await playQueueIndex(queue.length - 1);
-    } else {
-      if (isYouTubeTrack(currentTrackRef.current)) {
-        youtubePlayer.seek(0);
-      } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
-        void NativeAudio.seek({ positionMs: 0 });
-      } else {
-        audioEngine.seek(0);
-      }
-      setCurrentTime(0);
-    }
-  }, [queue.length, currentIndex, repeat, playQueueIndex, getActivePosition]);
 
   const seek = useCallback(
     (seconds: number) => {
       crossfadeTriggeredKeyRef.current = null;
+      nativeEndedTrackRef.current = null;
       if (isYouTubeTrack(currentTrackRef.current)) {
         youtubePlayer.seek(seconds);
       } else if (isNativeAudioAvailable() && getNativePlaybackUri(currentTrackRef.current)) {
@@ -629,15 +859,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [getActivePosition, seek]
   );
 
-  // Wire AudioEngine & YouTubePlayerEngine events
+  // Wire AudioEngine & YouTubePlayerEngine events once cleanly using refs
   useEffect(() => {
     const unsubAudioTime = audioEngine.on('timeupdate', ({ currentTime: ct, duration: dur }) => {
       if (isYouTubeTrack(currentTrackRef.current)) return;
       setCurrentTime(ct);
       if (dur > 0) setDuration(dur);
-      if (currentTrackId && Math.abs(ct - lastSavedPosRef.current) >= 5) {
+      const trackId = currentTrackIdRef.current;
+      if (trackId && Math.abs(ct - lastSavedPosRef.current) >= 5) {
         lastSavedPosRef.current = ct;
-        void saveTrackPosition(currentTrackId, ct);
+        void saveTrackPosition(trackId, ct);
         persistState({ position: ct });
       }
 
@@ -687,7 +918,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         showToast('Sleep timer paused at end of track', 'info');
         return;
       }
-      if (repeat === 'one' && currentTrack) {
+      if (repeatRef.current === 'one' && currentTrackRef.current) {
         audioEngine.seek(0);
         void audioEngine.play();
       } else {
@@ -751,7 +982,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         showToast('Sleep timer paused at end of track', 'info');
         return;
       }
-      if (repeat === 'one' && currentTrack) {
+      if (repeatRef.current === 'one' && currentTrackRef.current) {
         youtubePlayer.seek(0);
         youtubePlayer.play();
       } else {
@@ -763,7 +994,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       onNext: () => void nextTrack(),
       onPrev: () => void prevTrack(),
       onSeekStep: (delta) => seekBy(delta),
-      onPlay: () => void togglePlay(),
+      onPlay: () => void playActive(),
       onPause: () => pauseActive(),
       onSeekTo: (sec) => seek(sec),
     });
@@ -781,13 +1012,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       unsubYtEnded();
     };
   }, [
-    currentTrackId,
-    currentTrack,
-    repeat,
     nextTrack,
     prevTrack,
     seekBy,
-    togglePlay,
+    playActive,
     pauseActive,
     seek,
     saveTrackPosition,

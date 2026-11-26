@@ -16,6 +16,45 @@ import NativeAudio, { isNativeAudioAvailable } from '../plugins/nativeAudio';
 
 const SUPPORTED_EXTENSIONS = new Set(['mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac', 'opus', 'webm']);
 
+interface WebFilePickerWindow {
+  showOpenFilePicker?: (options?: {
+    multiple?: boolean;
+    excludeAcceptAllOption?: boolean;
+    types?: { description?: string; accept: Record<string, string[]> }[];
+  }) => Promise<FileSystemFileHandle[]>;
+  showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
+}
+
+type IterableDirectoryHandle = Omit<FileSystemDirectoryHandle, 'values'> & {
+  values(): AsyncIterable<FileSystemHandle>;
+};
+
+export interface PickHandlesResult {
+  handles: FileSystemFileHandle[];
+  cancelled?: boolean;
+  iframeBlocked?: boolean;
+}
+
+export function isWebFileSystemAccessSupported(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as WebFilePickerWindow;
+  return typeof w.showOpenFilePicker === 'function';
+}
+
+export function isInCrossOriginIframe(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+export function isSupportedAudioName(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  return SUPPORTED_EXTENSIONS.has(ext);
+}
+
 export interface ImportResult {
   importedTracks: Track[];
   skippedFiles: { name: string; reason: string }[];
@@ -40,8 +79,177 @@ export const localOnlyMetadataAdapter: MetadataLookupAdapter = {
 
 export function isSupportedAudioFile(file: File): boolean {
   if (file.type.startsWith('audio/')) return true;
-  const ext = file.name.split('.').pop()?.toLowerCase() || '';
-  return SUPPORTED_EXTENSIONS.has(ext);
+  return isSupportedAudioName(file.name);
+}
+
+export async function pickOriginalAudioFilesWeb(multiple = true): Promise<PickHandlesResult> {
+  if (!isWebFileSystemAccessSupported()) {
+    return { handles: [] };
+  }
+  const w = window as unknown as WebFilePickerWindow;
+  try {
+    const handles = await w.showOpenFilePicker!({
+      multiple,
+      types: [
+        {
+          description: 'Audio Files',
+          accept: {
+            'audio/*': ['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.flac', '.opus', '.webm'],
+          },
+        },
+      ],
+    });
+    return { handles };
+  } catch (err) {
+    if (err instanceof DOMException) {
+      if (err.name === 'AbortError') return { handles: [], cancelled: true };
+      if (err.name === 'SecurityError') return { handles: [], iframeBlocked: true };
+    }
+    throw err;
+  }
+}
+
+export async function pickOriginalDirectoryFilesWeb(): Promise<PickHandlesResult> {
+  if (typeof window === 'undefined') return { handles: [] };
+  const w = window as unknown as WebFilePickerWindow;
+  if (typeof w.showDirectoryPicker !== 'function') return { handles: [] };
+
+  let dir: FileSystemDirectoryHandle;
+  try {
+    try {
+      dir = await w.showDirectoryPicker({ mode: 'readwrite' });
+    } catch (innerErr) {
+      if (innerErr instanceof DOMException && innerErr.name === 'AbortError') {
+        return { handles: [], cancelled: true };
+      }
+      if (innerErr instanceof DOMException && innerErr.name === 'SecurityError') {
+        return { handles: [], iframeBlocked: true };
+      }
+      dir = await w.showDirectoryPicker();
+    }
+  } catch (err) {
+    if (err instanceof DOMException) {
+      if (err.name === 'AbortError') return { handles: [], cancelled: true };
+      if (err.name === 'SecurityError') return { handles: [], iframeBlocked: true };
+    }
+    throw err;
+  }
+
+  const collected: FileSystemFileHandle[] = [];
+  const walk = async (directory: FileSystemDirectoryHandle) => {
+    const iterable = directory as unknown as IterableDirectoryHandle;
+    for await (const entry of iterable.values()) {
+      if (entry.kind === 'file') {
+        if (isSupportedAudioName(entry.name)) {
+          collected.push(entry as FileSystemFileHandle);
+        }
+      } else if (entry.kind === 'directory') {
+        await walk(entry as FileSystemDirectoryHandle);
+      }
+    }
+  };
+  await walk(dir);
+  return { handles: collected };
+}
+
+export async function importFileHandles(
+  handles: FileSystemFileHandle[],
+  existingTracks: Track[],
+  onProgress?: (done: number, total: number, currentFileName: string) => void
+): Promise<ImportResult> {
+  const importedTracks: Track[] = [];
+  const skippedFiles: { name: string; reason: string }[] = [];
+  const existingSignatures = new Set(
+    existingTracks.map((t) => `${t.fileName.toLowerCase()}::${t.fileSize}`)
+  );
+
+  for (let i = 0; i < handles.length; i++) {
+    const handle = handles[i];
+    onProgress?.(i, handles.length, handle.name);
+
+    try {
+      const file = await handle.getFile();
+      if (!isSupportedAudioFile(file)) {
+        skippedFiles.push({ name: file.name, reason: 'Unsupported file format' });
+        continue;
+      }
+
+      const sig = `${file.name.toLowerCase()}::${file.size}`;
+      if (existingSignatures.has(sig)) {
+        skippedFiles.push({ name: file.name, reason: 'Already in library' });
+        continue;
+      }
+
+      const meta = await extractAudioMetadata(file);
+      const trackId = createId('trk');
+      let artworkId: string | undefined;
+      let artworkRecord: StoredArtworkRecord | undefined;
+
+      if (meta.artworkBlob && meta.artworkBlob.size > 0) {
+        artworkId = createId('art');
+        artworkRecord = {
+          id: artworkId,
+          blob: meta.artworkBlob,
+          size: meta.artworkBlob.size,
+          mimeType: meta.artworkBlob.type || 'image/jpeg',
+        };
+      }
+
+      let lyricsDoc: LyricsDocument | undefined;
+      if (meta.embeddedLyrics) {
+        const parsed = parseLrc(meta.embeddedLyrics);
+        lyricsDoc = {
+          trackId,
+          type: parsed.isSynced ? 'synced' : 'plain',
+          plainText: parsed.plainText,
+          syncedLines: parsed.syncedLines,
+          rawLrc: parsed.isSynced ? meta.embeddedLyrics : undefined,
+          source: 'embedded',
+          updatedAt: Date.now(),
+        };
+      }
+
+      const track: Track = {
+        id: trackId,
+        title: meta.title,
+        artist: meta.artist,
+        album: meta.album,
+        albumArtist: meta.albumArtist,
+        genre: meta.genre,
+        year: meta.year,
+        trackNumber: meta.trackNumber,
+        duration: meta.duration,
+        fileName: file.name,
+        mimeType: file.type || 'audio/mpeg',
+        fileSize: file.size,
+        format: meta.format,
+        artworkId,
+        isFavourite: false,
+        addedAt: Date.now() + i,
+        playCount: 0,
+        source: 'filehandle',
+      };
+
+      await db.putTrackWithHandle(track, handle, artworkRecord, lyricsDoc);
+      existingSignatures.add(sig);
+      importedTracks.push(track);
+    } catch (err) {
+      if (err instanceof StorageQuotaError) {
+        return {
+          importedTracks,
+          skippedFiles,
+          quotaError: err.message,
+        };
+      }
+      skippedFiles.push({
+        name: handle.name,
+        reason: err instanceof Error ? err.message : 'Failed to link audio file',
+      });
+    }
+  }
+
+  onProgress?.(handles.length, handles.length, '');
+  return { importedTracks, skippedFiles };
 }
 
 export async function importAudioFiles(
@@ -278,6 +486,7 @@ export async function importDocumentTracks(
   const existingUris = new Set(
     existingTracks.map((track) => track.contentUri).filter((uri): uri is string => Boolean(uri))
   );
+  const albumArtIdMap = new Map<string, string>();
 
   for (let i = 0; i < pickedTracks.length; i++) {
     const item = pickedTracks[i];
@@ -288,6 +497,27 @@ export async function importDocumentTracks(
     }
 
     try {
+      let artworkId: string | undefined;
+      if (item.artworkBase64) {
+        const albumKey = `${(item.album || 'Single').toLowerCase()}::${(item.albumArtist || item.artist || 'Unknown Artist').toLowerCase()}`;
+        const reusedId = albumArtIdMap.get(albumKey);
+        if (reusedId) {
+          artworkId = reusedId;
+        } else {
+          const blob = base64ToBlob(item.artworkBase64, item.artworkMimeType || 'image/jpeg');
+          if (blob.size > 0) {
+            artworkId = createId('art');
+            await db.putArtwork({
+              id: artworkId,
+              blob,
+              size: blob.size,
+              mimeType: item.artworkMimeType || 'image/jpeg',
+            });
+            albumArtIdMap.set(albumKey, artworkId);
+          }
+        }
+      }
+
       const track: Track = {
         id: createId('trk'),
         title: sanitizeText(item.title, item.fileName),
@@ -302,6 +532,7 @@ export async function importDocumentTracks(
         mimeType: item.mimeType || 'audio/mpeg',
         fileSize: item.fileSize || 0,
         format: item.format || 'AUDIO',
+        artworkId,
         isFavourite: false,
         addedAt: Date.now() + i,
         playCount: 0,

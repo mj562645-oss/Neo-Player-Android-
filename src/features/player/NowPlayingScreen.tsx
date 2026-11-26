@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Gauge,
   Heart,
+  Image as ImageIcon,
   ListEnd,
   ListMusic,
   ListPlus,
@@ -38,6 +39,7 @@ import { PlaybackControls } from '../../components/PlaybackControls';
 import { ProgressSlider } from '../../components/ProgressSlider';
 import { GlassModal } from '../../components/glass/GlassModal';
 import { Slider } from '../../components/ui/slider';
+import { Switch } from '../../components/ui/switch';
 import { TrackMetadataModal } from '../library/TrackMetadataModal';
 
 const PLAYBACK_SPEEDS = [0.75, 1, 1.15, 1.25, 1.5, 2] as const;
@@ -75,7 +77,7 @@ export const NowPlayingScreen: React.FC = () => {
     sleepRemainingSeconds,
     setSleepTimer,
   } = usePlayer();
-  const { settings, resolvedTheme, updateSettings, isArtistFollowed, toggleFollowArtist } = useTheme();
+  const { settings, resolvedTheme, updateSettings, updatePersonalization, isArtistFollowed, toggleFollowArtist } = useTheme();
   const { showToast } = useToast();
   const { artworkUrl: dominantArtUrl, palette } = useDominantColor(
     currentTrack?.artworkId,
@@ -84,6 +86,7 @@ export const NowPlayingScreen: React.FC = () => {
   const artworkUrl = useArtworkUrl(currentTrack?.artworkId) || currentTrack?.artworkUrl || null;
   const bgArtworkUrl = artworkUrl || dominantArtUrl || null;
   const p = settings.personalization;
+  const showArtworkBg = p.nowPlayingArtworkBackground ?? true;
   const isYtLetterbox = Boolean(
     bgArtworkUrl && /ytimg\.com\/vi\/[^/]+\/(hqdefault|sddefault|default)\.jpg/i.test(bgArtworkUrl)
   );
@@ -183,75 +186,146 @@ export const NowPlayingScreen: React.FC = () => {
           aria-label="Now Playing"
           className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-[var(--neo-app-bg)] text-[#111216] dark:text-[#F5F5F7]"
         >
-          {/* Full-Bleed Album Art Background harmonized with active Glass & Theme Effect */}
-          {bgArtworkUrl && (
-            <img
-              key={bgArtworkUrl}
-              src={bgArtworkUrl}
-              alt=""
-              aria-hidden="true"
-              referrerPolicy="no-referrer"
-              className={cn(
-                'pointer-events-none absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-700',
-                isYtLetterbox ? 'scale-[1.36]' : 'scale-110',
-                p.glassStyle === 'solid'
-                  ? 'opacity-35 dark:opacity-30'
-                  : showLyrics
-                    ? 'opacity-65 dark:opacity-55'
-                    : 'opacity-85 dark:opacity-80'
-              )}
-            />
+          {/* Full-Bleed Album Art Background harmonized with System Light/Dark & Active Design Theme */}
+          {showArtworkBg && bgArtworkUrl && (
+            <AnimatePresence mode="sync">
+              <motion.img
+                key={bgArtworkUrl}
+                src={bgArtworkUrl}
+                alt=""
+                aria-hidden="true"
+                referrerPolicy="no-referrer"
+                initial={settings.reducedMotion ? { opacity: 1 } : { opacity: 0 }}
+                animate={{
+                  opacity:
+                    resolvedTheme === 'dark'
+                      ? p.uiTheme === 'windows'
+                        ? showLyrics
+                          ? 0.42
+                          : 0.56
+                        : p.uiTheme === 'material'
+                          ? showLyrics
+                            ? 0.48
+                            : 0.64
+                          : p.glassStyle === 'solid'
+                            ? 0.34
+                            : showLyrics
+                              ? 0.58
+                              : 0.84
+                      : p.uiTheme === 'windows'
+                        ? showLyrics
+                          ? 0.30
+                          : 0.44
+                        : p.uiTheme === 'material'
+                          ? showLyrics
+                            ? 0.36
+                            : 0.52
+                          : p.glassStyle === 'solid'
+                            ? 0.30
+                            : showLyrics
+                              ? 0.50
+                              : 0.72,
+                }}
+                exit={settings.reducedMotion ? { opacity: 0 } : { opacity: 0 }}
+                transition={{ duration: 0.55, ease: 'easeOut' }}
+                className={cn(
+                  'pointer-events-none absolute inset-0 w-full h-full object-cover object-center',
+                  isYtLetterbox ? 'scale-[1.36]' : 'scale-110'
+                )}
+              />
+            </AnimatePresence>
           )}
+
+          {/* Dynamic Color Ambient Wash (adapts to system Light/Dark & Design Theme) */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 transition-all duration-700"
             style={{
               background:
-                p.uiTheme === 'material'
-                  ? `radial-gradient(circle at 22% 20%, ${palette.primary}, transparent 60%), radial-gradient(circle at 78% 80%, var(--neo-accent-soft), transparent 65%)`
-                  : `radial-gradient(circle at 22% 20%, ${palette.primary}, transparent 58%), radial-gradient(circle at 78% 78%, ${palette.secondary}, transparent 62%)`,
+                showArtworkBg && bgArtworkUrl
+                  ? p.uiTheme === 'material'
+                    ? `radial-gradient(circle at 20% 18%, ${palette.primary}, transparent 62%), radial-gradient(circle at 80% 82%, var(--neo-accent-soft), transparent 64%)`
+                    : p.uiTheme === 'windows'
+                      ? `radial-gradient(circle at 18% 20%, ${palette.primary}, transparent 56%), radial-gradient(circle at 82% 78%, var(--neo-secondary-soft), transparent 60%)`
+                      : `radial-gradient(circle at 22% 20%, ${palette.primary}, transparent 58%), radial-gradient(circle at 78% 78%, ${palette.secondary}, transparent 62%)`
+                  : `radial-gradient(circle at 20% 20%, var(--neo-accent-soft), transparent 60%), radial-gradient(circle at 80% 80%, var(--neo-secondary-soft), transparent 62%)`,
+              opacity: showArtworkBg ? 1 : 0.72,
             }}
           />
+
+          {/* Theme-Specific Diffusion & System Light/Dark Scrim */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 transition-all duration-300"
+            className="neo-artwork-backdrop-blur pointer-events-none absolute inset-0 transition-all duration-300"
             style={(() => {
-              const baseBlur = Math.max(12, Math.min(44, p.glassBlur ?? 28));
-              const backdropBlur =
-                p.glassStyle === 'solid'
-                  ? 14
-                  : p.glassStyle === 'clear'
-                    ? Math.round(baseBlur * 0.55)
-                    : p.uiTheme === 'material'
-                      ? Math.round(baseBlur * 0.85)
-                      : Math.round(baseBlur * 0.95);
-              const saturate =
-                p.uiTheme === 'ios'
-                  ? '195%'
-                  : p.uiTheme === 'windows'
-                    ? '135%'
-                    : p.uiTheme === 'material'
-                      ? '130%'
-                      : '175%';
-
               const isDark = resolvedTheme === 'dark';
+              const baseBlur = Math.max(12, Math.min(44, p.glassBlur ?? 28));
+
+              if (!showArtworkBg) {
+                return {
+                  backgroundColor: isDark
+                    ? p.uiTheme === 'windows'
+                      ? 'rgba(32, 32, 32, 0.92)'
+                      : 'rgba(12, 13, 18, 0.88)'
+                    : p.uiTheme === 'windows'
+                      ? 'rgba(243, 243, 243, 0.92)'
+                      : 'rgba(247, 247, 250, 0.90)',
+                };
+              }
+
+              const backdropBlur =
+                p.uiTheme === 'windows'
+                  ? 44
+                  : p.uiTheme === 'material'
+                    ? 34
+                    : p.glassStyle === 'solid'
+                      ? 16
+                      : p.glassStyle === 'clear'
+                        ? Math.round(baseBlur * 0.65)
+                        : Math.round(baseBlur * 0.95);
+
+              const saturate =
+                p.uiTheme === 'windows'
+                  ? '135%'
+                  : p.uiTheme === 'material'
+                    ? '145%'
+                    : '180%';
+
               let bgOverlay: string;
-              if (p.glassStyle === 'clear') {
+              if (p.uiTheme === 'windows') {
+                // Windows 11 Acrylic / Mica tint harmonized to Light (#F3F3F3) or Dark (#202020)
+                bgOverlay = isDark
+                  ? showLyrics
+                    ? 'rgba(32, 32, 32, 0.68)'
+                    : 'rgba(32, 32, 32, 0.52)'
+                  : showLyrics
+                    ? 'rgba(243, 243, 243, 0.72)'
+                    : 'rgba(243, 243, 243, 0.58)';
+              } else if (p.uiTheme === 'material') {
+                // Google Material Design 3 dynamic color scrim harmonized to Light/Dark tonal surface
+                bgOverlay = isDark
+                  ? showLyrics
+                    ? 'rgba(19, 19, 24, 0.64)'
+                    : 'rgba(19, 19, 24, 0.46)'
+                  : showLyrics
+                    ? 'rgba(248, 249, 253, 0.70)'
+                    : 'rgba(248, 249, 253, 0.54)';
+              } else if (p.glassStyle === 'clear') {
                 bgOverlay = isDark
                   ? showLyrics
                     ? 'rgba(9, 10, 14, 0.54)'
                     : 'rgba(9, 10, 14, 0.34)'
                   : showLyrics
-                    ? 'rgba(248, 248, 252, 0.56)'
-                    : 'rgba(248, 248, 252, 0.34)';
+                    ? 'rgba(248, 248, 252, 0.62)'
+                    : 'rgba(248, 248, 252, 0.42)';
               } else if (p.glassStyle === 'tinted') {
                 bgOverlay = isDark
                   ? showLyrics
                     ? 'rgba(12, 13, 20, 0.62)'
                     : 'rgba(12, 13, 20, 0.44)'
                   : showLyrics
-                    ? 'rgba(246, 245, 252, 0.64)'
-                    : 'rgba(246, 245, 252, 0.46)';
+                    ? 'rgba(246, 245, 252, 0.68)'
+                    : 'rgba(246, 245, 252, 0.52)';
               } else if (p.glassStyle === 'solid') {
                 bgOverlay = isDark
                   ? showLyrics
@@ -267,8 +341,8 @@ export const NowPlayingScreen: React.FC = () => {
                     ? 'rgba(9, 10, 14, 0.58)'
                     : 'rgba(9, 10, 14, 0.42)'
                   : showLyrics
-                    ? 'rgba(248, 249, 252, 0.60)'
-                    : 'rgba(248, 249, 252, 0.44)';
+                    ? 'rgba(248, 249, 252, 0.66)'
+                    : 'rgba(248, 249, 252, 0.50)';
               }
 
               return {
@@ -278,14 +352,16 @@ export const NowPlayingScreen: React.FC = () => {
               };
             })()}
           />
+
+          {/* Contrast Readability Gradient (guarantees AA contrast across bright & dark album covers) */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-0"
             style={{
               background:
                 resolvedTheme === 'dark'
-                  ? 'linear-gradient(180deg, rgba(0,0,0,0.16) 0%, rgba(0,0,0,0.04) 40%, rgba(0,0,0,0.42) 100%)'
-                  : 'linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 40%, rgba(255,255,255,0.38) 100%)',
+                  ? 'linear-gradient(180deg, rgba(8,9,13,0.34) 0%, rgba(8,9,13,0.10) 38%, rgba(8,9,13,0.58) 100%)'
+                  : 'linear-gradient(180deg, rgba(248,249,253,0.44) 0%, rgba(248,249,253,0.16) 38%, rgba(248,249,253,0.68) 100%)',
             }}
           />
 
@@ -295,13 +371,16 @@ export const NowPlayingScreen: React.FC = () => {
               type="button"
               onClick={() => setNowPlayingOpen(false)}
               aria-label="Minimize Now Playing"
-              className="min-h-[44px] min-w-[44px] rounded-full liquid-glass-subtle flex items-center justify-center hover:bg-white/60 dark:hover:bg-white/15 transition-colors cursor-pointer"
+              className={cn(
+                'min-h-[44px] min-w-[44px] liquid-glass-subtle flex items-center justify-center hover:brightness-105 transition-colors cursor-pointer',
+                p.uiTheme === 'windows' ? 'neo-btn-radius' : 'rounded-full'
+              )}
             >
               <ChevronDown className="w-5 h-5" />
             </button>
 
             <div className="text-center min-w-0 px-4">
-              <p className="text-xs font-medium text-[#6E6E73] dark:text-[#AEAEB2] truncate">
+              <p className="text-xs font-semibold text-[#3A3A40] dark:text-[#D1D1D6] truncate">
                 {showLyrics ? 'Lyrics Overlay' : currentTrack.album}
               </p>
               {sleepStatusLabel && (
@@ -316,7 +395,8 @@ export const NowPlayingScreen: React.FC = () => {
               onClick={() => setMoreOpen(true)}
               aria-label="More playback and track options"
               className={cn(
-                'min-h-[44px] min-w-[44px] rounded-full liquid-glass-subtle flex items-center justify-center hover:bg-white/60 dark:hover:bg-white/15 transition-colors cursor-pointer relative',
+                'min-h-[44px] min-w-[44px] liquid-glass-subtle flex items-center justify-center hover:brightness-105 transition-colors cursor-pointer relative',
+                p.uiTheme === 'windows' ? 'neo-btn-radius' : 'rounded-full',
                 hasActiveExtras && 'text-[var(--neo-accent)]'
               )}
             >
@@ -521,7 +601,7 @@ export const NowPlayingScreen: React.FC = () => {
                       <h2 className="text-xl sm:text-2xl font-bold tracking-tight font-display truncate">
                         {currentTrack.title}
                       </h2>
-                      <p className="text-sm sm:text-base text-[#48484A] dark:text-[#AEAEB2] truncate mt-0.5">
+                      <p className="text-sm sm:text-base text-[#3A3A40] dark:text-[#C7C7CC] truncate mt-0.5">
                         {currentTrack.artist}
                         <span aria-hidden="true"> · </span>
                         <span>{currentTrack.format}</span>
@@ -908,6 +988,26 @@ export const NowPlayingScreen: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* Now Playing Backdrop Toggle */}
+              <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl liquid-glass-subtle">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ImageIcon className="w-4 h-4 text-[var(--neo-accent)] shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold">Album Art Background</p>
+                    <p className="text-[11px] text-[#6E6E73] dark:text-[#98989D] truncate">
+                      Harmonized to {resolvedTheme === 'dark' ? 'Dark' : 'Light'} mode &amp; active theme
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={showArtworkBg}
+                  onCheckedChange={(checked) =>
+                    void updatePersonalization({ nowPlayingArtworkBackground: checked })
+                  }
+                  aria-label="Toggle Now Playing album art background"
+                />
+              </div>
 
               {/* Local Metadata Tools or YouTube External Link */}
               <div className="pt-2 border-t border-black/8 dark:border-white/10 space-y-2">

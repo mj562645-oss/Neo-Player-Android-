@@ -77,6 +77,10 @@ export const PlaylistDetailView: React.FC<PlaylistDetailViewProps> = ({
   const pureTracks = playlistTracks.map((item) => item.track);
   const totalDuration = pureTracks.reduce((sum, t) => sum + (t.duration || 0), 0);
   const coverArtworkId = playlist.artworkId || pureTracks.find((t) => t.artworkId)?.artworkId;
+  const coverArtworkUrl =
+    !playlist.artworkId && !coverArtworkId
+      ? pureTracks.find((t) => t.artworkUrl)?.artworkUrl
+      : undefined;
   const mood = settings.moodCategories.find((m) => m.id === playlist.moodCategoryId);
 
   const openEdit = () => {
@@ -130,6 +134,7 @@ export const PlaylistDetailView: React.FC<PlaylistDetailViewProps> = ({
         <div className="relative group">
           <AlbumArtwork
             artworkId={coverArtworkId}
+            artworkUrl={coverArtworkUrl}
             alt={playlist.name}
             fallbackSeed={playlist.name}
             accentColor={mood?.accentColor}
@@ -234,6 +239,7 @@ export const PlaylistDetailView: React.FC<PlaylistDetailViewProps> = ({
                   </span>
                   <AlbumArtwork
                     artworkId={track.artworkId}
+                    artworkUrl={track.artworkUrl}
                     alt={track.title}
                     fallbackSeed={`${track.album}-${track.artist}`}
                     size="xs"
@@ -375,6 +381,7 @@ export const PlaylistDetailView: React.FC<PlaylistDetailViewProps> = ({
                 >
                   <AlbumArtwork
                     artworkId={t.artworkId}
+                    artworkUrl={t.artworkUrl}
                     alt={t.title}
                     fallbackSeed={t.album}
                     size="xs"

@@ -414,6 +414,31 @@ export async function extractAudioMetadata(file: File): Promise<ExtractedAudioMe
         const tailBuf = new Uint8Array(await file.slice(tailStart, file.size).arrayBuffer());
         parseMp4Atoms(tailBuf, 0, tailBuf.length, parsed);
       }
+    } else if (
+      buffer.length >= 12 &&
+      String.fromCharCode(buffer[0], buffer[1], buffer[2], buffer[3]) === 'RIFF' &&
+      String.fromCharCode(buffer[8], buffer[9], buffer[10], buffer[11]) === 'WAVE'
+    ) {
+      // Check tail or head for an 'id3 ' chunk inside WAV
+      const wavTailStart = Math.max(0, file.size - 2 * 1024 * 1024);
+      const wavTail =
+        wavTailStart === 0
+          ? buffer
+          : new Uint8Array(await file.slice(wavTailStart, file.size).arrayBuffer());
+      for (let idx = 0; idx + 18 <= wavTail.length; idx++) {
+        if (
+          (wavTail[idx] === 0x69 || wavTail[idx] === 0x49) &&
+          (wavTail[idx + 1] === 0x64 || wavTail[idx + 1] === 0x44) &&
+          wavTail[idx + 2] === 0x33 &&
+          wavTail[idx + 3] === 0x20 &&
+          wavTail[idx + 8] === 0x49 &&
+          wavTail[idx + 9] === 0x44 &&
+          wavTail[idx + 10] === 0x33
+        ) {
+          parseId3v2(wavTail.slice(idx + 8), parsed);
+          break;
+        }
+      }
     }
   } catch {
     // Graceful fallback if binary header is malformed

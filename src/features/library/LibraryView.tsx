@@ -7,8 +7,10 @@ import {
   Check,
   CheckSquare,
   ChevronDown,
+  ExternalLink,
   Heart,
   LayoutGrid,
+  Link2,
   List,
   ListPlus,
   Loader2,
@@ -33,6 +35,7 @@ import { useToast } from '../../app/ToastContext';
 import { useYouTube } from '../../app/YouTubeContext';
 import { formatTime } from '../../lib/format';
 import { isNativeMediaStoreAvailable } from '../../plugins/mediaStore';
+import { isWebFileSystemAccessSupported } from '../../services/libraryService';
 import {
   SORT_OPTIONS,
   getDefaultDirectionForSortField,
@@ -95,6 +98,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     playlists,
     importFiles,
     pickAndImportAudioFiles,
+    pickAndLinkOriginalFiles,
     scanDeviceMediaStore,
     isScanningMediaStore,
     enrichProgress,
@@ -108,6 +112,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     addTracksToPlaylist,
   } = useLibrary();
   const hasNativeMediaStore = isNativeMediaStoreAvailable();
+  const canLinkOriginalWeb = !hasNativeMediaStore && isWebFileSystemAccessSupported();
   const {
     currentTrack,
     isPlaying,
@@ -130,14 +135,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
+  const [iframeNotice, setIframeNotice] = useState(false);
 
   const sortField: LibrarySortField = settings.librarySortField ?? 'addedAt';
   const sortDir: SortDirection = settings.librarySortDirection ?? 'desc';
 
   const quickUploadRef = useRef<HTMLInputElement | null>(null);
-  const handleImportClick = () => {
+  const handleImportClick = async () => {
+    setIframeNotice(false);
     if (hasNativeMediaStore) {
       void pickAndImportAudioFiles();
+    } else if (canLinkOriginalWeb) {
+      const res = await pickAndLinkOriginalFiles();
+      if (res.iframeBlocked) {
+        setIframeNotice(true);
+      }
     } else {
       quickUploadRef.current?.click();
     }
@@ -617,10 +629,16 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <GlassButton
             size="sm"
             variant={hasNativeMediaStore ? 'glass' : 'accent'}
-            onClick={handleImportClick}
+            onClick={() => void handleImportClick()}
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{hasNativeMediaStore ? 'Pick Editable Music' : 'Import Music'}</span>
+            {canLinkOriginalWeb ? <Link2 className="w-3.5 h-3.5" /> : <Upload className="w-3.5 h-3.5" />}
+            <span>
+              {hasNativeMediaStore
+                ? 'Pick Editable Music'
+                : canLinkOriginalWeb
+                  ? 'Link Music'
+                  : 'Import Music'}
+            </span>
           </GlassButton>
           {(activeTab === 'songs' || activeTab === 'favourites' || activeTab === 'recent') && (
             <GlassButton
@@ -634,6 +652,42 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           )}
         </div>
       </div>
+
+      {iframeNotice && (
+        <GlassCard className="p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <p className="text-[#48484A] dark:text-[#AEAEB2] flex-1 min-w-[200px]">
+            Direct disk linking requires a standalone tab. Open in a new tab to link & edit original files without copying, or copy files into browser storage.
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={typeof window !== 'undefined' ? window.location.href : '/'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 min-h-[34px] px-3 rounded-xl bg-[var(--neo-accent)] text-white font-semibold hover:brightness-110 transition-all"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open in New Tab</span>
+            </a>
+            <GlassButton
+              size="sm"
+              onClick={() => {
+                setIframeNotice(false);
+                quickUploadRef.current?.click();
+              }}
+            >
+              Copy Files
+            </GlassButton>
+            <GlassButton
+              size="sm"
+              variant="ghost"
+              aria-label="Dismiss notice"
+              onClick={() => setIframeNotice(false)}
+            >
+              <X className="w-3.5 h-3.5" />
+            </GlassButton>
+          </div>
+        </GlassCard>
+      )}
 
       {/* Category Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">

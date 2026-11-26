@@ -1,5 +1,5 @@
 import { DEFAULT_EQUALIZER_SETTINGS } from '../lib/equalizer';
-import { DEFAULT_PERSONALIZATION } from '../lib/palettes';
+import { DEFAULT_PERSONALIZATION, normalizeUiThemeId } from '../lib/palettes';
 import type {
   LyricsDocument,
   MoodCategory,
@@ -10,7 +10,7 @@ import type {
 } from '../types/music';
 
 const DB_NAME = 'neo-player-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const DEFAULT_MOOD_CATEGORIES: MoodCategory[] = [
   { id: 'mood_late_night', name: 'Late Night', description: 'After-hours acoustics and low-lit grooves', accentColor: '#5E5CE6', isDefault: true },
@@ -49,6 +49,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   notifyTrending: true,
   notifyFavoriteArtists: true,
   osNotificationsEnabled: false,
+  audioOutputDeviceId: '',
+  pauseOnBluetoothDisconnect: true,
+  bluetoothMetadataSync: true,
   personalization: DEFAULT_PERSONALIZATION,
 };
 
@@ -76,6 +79,11 @@ export interface StoredArtworkRecord {
   blob: Blob;
   size: number;
   mimeType: string;
+}
+
+export interface StoredFileHandleRecord {
+  id: string;
+  handle: FileSystemFileHandle;
 }
 
 export class StorageQuotaError extends Error {
@@ -156,6 +164,9 @@ class NeoDatabase {
         if (!db.objectStoreNames.contains('playback')) {
           db.createObjectStore('playback', { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains('fileHandles')) {
+          db.createObjectStore('fileHandles', { keyPath: 'id' });
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB'));
@@ -207,12 +218,58 @@ class NeoDatabase {
     await wrapTx(tx);
   }
 
+  async putTrackWithHandle(
+    track: Track,
+    handle: FileSystemFileHandle,
+    artworkRecord?: StoredArtworkRecord,
+    lyricsDoc?: LyricsDocument
+  ): Promise<void> {
+    const db = await this.open();
+    const stores = ['tracks', 'fileHandles', 'audioFiles', 'artworks', 'lyrics'];
+    const tx = db.transaction(stores, 'readwrite');
+    tx.objectStore('tracks').put(track);
+    tx.objectStore('fileHandles').put({
+      id: track.id,
+      handle,
+    } satisfies StoredFileHandleRecord);
+    tx.objectStore('audioFiles').delete(track.id);
+    if (artworkRecord) {
+      tx.objectStore('artworks').put(artworkRecord);
+    }
+    if (lyricsDoc) {
+      tx.objectStore('lyrics').put(lyricsDoc);
+    }
+    await wrapTx(tx);
+  }
+
+  async putFileHandle(trackId: string, handle: FileSystemFileHandle): Promise<void> {
+    const db = await this.open();
+    const tx = db.transaction(['fileHandles', 'audioFiles'], 'readwrite');
+    tx.objectStore('fileHandles').put({
+      id: trackId,
+      handle,
+    } satisfies StoredFileHandleRecord);
+    // Remove legacy audio copy so app doesn't hold duplicate file bytes
+    tx.objectStore('audioFiles').delete(trackId);
+    await wrapTx(tx);
+  }
+
+  async getFileHandle(trackId: string): Promise<FileSystemFileHandle | null> {
+    const db = await this.open();
+    const tx = db.transaction('fileHandles', 'readonly');
+    const rec = await wrapRequest<StoredFileHandleRecord | undefined>(
+      tx.objectStore('fileHandles').get(trackId)
+    );
+    return rec ? rec.handle : null;
+  }
+
   async deleteTracks(trackIds: string[]): Promise<void> {
     const db = await this.open();
-    const tx = db.transaction(['tracks', 'audioFiles', 'lyrics'], 'readwrite');
+    const tx = db.transaction(['tracks', 'audioFiles', 'fileHandles', 'lyrics'], 'readwrite');
     for (const id of trackIds) {
       tx.objectStore('tracks').delete(id);
       tx.objectStore('audioFiles').delete(id);
+      tx.objectStore('fileHandles').delete(id);
       tx.objectStore('lyrics').delete(id);
     }
     await wrapTx(tx);
@@ -340,6 +397,14 @@ class NeoDatabase {
       tx.objectStore('settings').get('user_settings')
     );
     if (!stored) return DEFAULT_USER_SETTINGS;
+    const rawUiTheme = stored.personalization?.uiTheme as string | undefined;
+    const normalizedUiTheme = normalizeUiThemeId(rawUiTheme);
+    const storedPaletteId = stored.personalization?.activePaletteId;
+    const migratedPaletteId =
+      rawUiTheme === 'ios' || (storedPaletteId && storedPaletteId.startsWith('ios_'))
+        ? DEFAULT_PERSONALIZATION.activePaletteId
+        : storedPaletteId || DEFAULT_PERSONALIZATION.activePaletteId;
+
     return {
       ...DEFAULT_USER_SETTINGS,
       ...stored,
@@ -353,6 +418,8 @@ class NeoDatabase {
       personalization: {
         ...DEFAULT_PERSONALIZATION,
         ...(stored.personalization || {}),
+        uiTheme: normalizedUiTheme,
+        activePaletteId: migratedPaletteId,
       },
       equalizer: {
         ...DEFAULT_EQUALIZER_SETTINGS,
@@ -391,11 +458,12 @@ class NeoDatabase {
     this.artworkUrlCache.clear();
     const db = await this.open();
     const tx = db.transaction(
-      ['tracks', 'audioFiles', 'artworks', 'playlists', 'lyrics', 'playback'],
+      ['tracks', 'audioFiles', 'fileHandles', 'artworks', 'playlists', 'lyrics', 'playback'],
       'readwrite'
     );
     tx.objectStore('tracks').clear();
     tx.objectStore('audioFiles').clear();
+    tx.objectStore('fileHandles').clear();
     tx.objectStore('artworks').clear();
     tx.objectStore('playlists').clear();
     tx.objectStore('lyrics').clear();

@@ -1,7 +1,25 @@
 import { DEFAULT_EQUALIZER_SETTINGS, clampDb } from '../lib/equalizer';
+import {
+  bindNavigatorMediaSessionHandlers,
+  setMediaSessionHandlers,
+  setMediaSessionPlaybackState,
+  updateMediaSessionPosition,
+  updateMediaSessionTrackMetadata,
+  type MediaSessionActionHandlers,
+} from '../lib/mediaSession';
 import { resolveMediaStorePlayableUrl } from '../plugins/mediaStore';
 import type { EqualizerSettings, Track } from '../types/music';
 import { db } from './db';
+
+export interface AudioOutputDevice {
+  deviceId: string;
+  label: string;
+}
+
+type SinkIdAudioElement = HTMLAudioElement & {
+  sinkId?: string;
+  setSinkId?: (sinkId: string) => Promise<void>;
+};
 
 export type AudioEngineEvents = {
   timeupdate: { currentTime: number; duration: number };
@@ -43,24 +61,145 @@ class SharedAudioEngine {
   private baseVolume = 0.85;
   private isMuted = false;
   private playbackRate = 1;
-
-  private onNextCallback?: () => void;
-  private onPrevCallback?: () => void;
-  private onSeekStepCallback?: (delta: number) => void;
-  private onPlayCallback?: () => void;
-  private onPauseCallback?: () => void;
-  private onSeekToCallback?: (seconds: number) => void;
+  private currentOutputDeviceId = '';
 
   constructor() {
     const deckA = new Audio();
     const deckB = new Audio();
     deckA.preload = 'auto';
     deckB.preload = 'auto';
+    deckA.setAttribute('playsinline', '');
+    deckB.setAttribute('playsinline', '');
     this.decks = [deckA, deckB];
 
     this.attachDeckEvents(0);
     this.attachDeckEvents(1);
-    this.bindMediaSessionHandlers();
+    bindNavigatorMediaSessionHandlers();
+  }
+
+  isSinkIdSupported(): boolean {
+    if (typeof HTMLMediaElement === 'undefined') return false;
+    return typeof (this.decks[0] as SinkIdAudioElement).setSinkId === 'function';
+  }
+
+  async listAudioOutputDevices(): Promise<AudioOutputDevice[]> {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.enumerateDevices !== 'function'
+    ) {
+      return [];
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter((d) => d.kind === 'audiooutput');
+      return outputs.map((d, index) => ({
+        deviceId: d.deviceId,
+        label:
+          d.label?.trim() ||
+          (d.deviceId === 'default'
+            ? 'System Default (Bluetooth / Speaker)'
+            : d.deviceId === 'communications'
+              ? 'Communications Audio Output'
+              : `Audio Output ${index + 1}`),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async setAudioOutputDevice(deviceId: string): Promise<boolean> {
+    const normalizedId = deviceId || '';
+    this.currentOutputDeviceId = normalizedId;
+    if (!this.isSinkIdSupported()) return false;
+    try {
+      await Promise.all(
+        this.decks.map(async (deck) => {
+          const sinkDeck = deck as SinkIdAudioElement;
+          if (typeof sinkDeck.setSinkId === 'function') {
+            await sinkDeck.setSinkId(normalizedId);
+          }
+        })
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  onOutputDeviceDisconnected(
+    callback: (info: { selectedDeviceRemoved: boolean }) => void
+  ): () => void {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.addEventListener !== 'function' ||
+      typeof navigator.mediaDevices.enumerateDevices !== 'function'
+    ) {
+      return () => {};
+    }
+
+    let knownOutputIds = new Set<string>();
+    let disposed = false;
+
+    const refreshKnownIds = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (disposed) return;
+        knownOutputIds = new Set(
+          devices
+            .filter((d) => d.kind === 'audiooutput' && d.deviceId)
+            .map((d) => d.deviceId)
+        );
+      } catch {
+        // Ignore device enumeration permission errors
+      }
+    };
+
+    void refreshKnownIds();
+
+    const handleDeviceChange = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (disposed) return;
+        const nextIds = new Set(
+          devices
+            .filter((d) => d.kind === 'audiooutput' && d.deviceId)
+            .map((d) => d.deviceId)
+        );
+
+        if (knownOutputIds.size > 0) {
+          let anyRemoved = false;
+          for (const prevId of knownOutputIds) {
+            if (prevId !== 'default' && prevId !== 'communications' && !nextIds.has(prevId)) {
+              anyRemoved = true;
+              break;
+            }
+          }
+          const selectedDeviceRemoved = Boolean(
+            this.currentOutputDeviceId &&
+              this.currentOutputDeviceId !== 'default' &&
+              !nextIds.has(this.currentOutputDeviceId)
+          );
+
+          if (anyRemoved || selectedDeviceRemoved) {
+            callback({ selectedDeviceRemoved });
+          }
+        }
+        knownOutputIds = nextIds;
+      } catch {
+        // Ignore transient device change errors
+      }
+    };
+
+    const listener = () => {
+      void handleDeviceChange();
+    };
+    navigator.mediaDevices.addEventListener('devicechange', listener);
+    return () => {
+      disposed = true;
+      navigator.mediaDevices.removeEventListener('devicechange', listener);
+    };
   }
 
   private get activeAudio(): HTMLAudioElement {
@@ -72,40 +211,37 @@ class SharedAudioEngine {
 
     el.addEventListener('timeupdate', () => {
       if (deckIndex !== this.activeDeckIndex) return;
+      const dur = Number.isFinite(el.duration) ? el.duration : 0;
       this.emit('timeupdate', {
         currentTime: el.currentTime || 0,
-        duration: Number.isFinite(el.duration) ? el.duration : 0,
+        duration: dur,
       });
-      this.updateMediaSessionPosition();
+      this.syncMediaSessionPosition();
     });
 
     el.addEventListener('loadedmetadata', () => {
       if (deckIndex !== this.activeDeckIndex) return;
-      this.emit('loaded', {
-        duration: Number.isFinite(el.duration) ? el.duration : 0,
-      });
-      this.updateMediaSessionPosition();
+      const dur = Number.isFinite(el.duration) ? el.duration : 0;
+      this.emit('loaded', { duration: dur });
+      this.syncMediaSessionPosition();
     });
 
     el.addEventListener('play', () => {
       if (deckIndex !== this.activeDeckIndex) return;
       this.emit('playstate', { isPlaying: true });
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'playing';
-      }
+      setMediaSessionPlaybackState('playing');
+      this.syncMediaSessionPosition();
     });
 
     el.addEventListener('pause', () => {
       if (deckIndex !== this.activeDeckIndex) return;
       this.emit('playstate', { isPlaying: false });
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'paused';
-      }
+      setMediaSessionPlaybackState('paused');
+      this.syncMediaSessionPosition();
     });
 
     el.addEventListener('ended', () => {
       if (deckIndex !== this.activeDeckIndex) {
-        // Outgoing crossfading deck naturally finished before timer ended — clean it silently
         this.cleanupDeck(deckIndex);
         if (this.fadingOutgoingIndex === deckIndex) {
           this.fadingOutgoingIndex = null;
@@ -155,99 +291,32 @@ class SharedAudioEngine {
     onPause?: () => void;
     onSeekTo?: (seconds: number) => void;
   }): void {
-    this.onNextCallback = handlers.onNext;
-    this.onPrevCallback = handlers.onPrev;
-    this.onSeekStepCallback = handlers.onSeekStep;
-    this.onPlayCallback = handlers.onPlay;
-    this.onPauseCallback = handlers.onPause;
-    this.onSeekToCallback = handlers.onSeekTo;
-  }
-
-  private bindMediaSessionHandlers(): void {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
-    const ms = navigator.mediaSession;
-    const safeSet = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
-      try {
-        ms.setActionHandler(action, handler);
-      } catch {
-        // Ignore unsupported actions in certain browsers
-      }
+    const normalized: MediaSessionActionHandlers = {
+      onNext: handlers.onNext,
+      onPrev: handlers.onPrev,
+      onSeekStep: handlers.onSeekStep,
+      onPlay: handlers.onPlay ?? (() => void this.play()),
+      onPause: handlers.onPause ?? (() => this.pause()),
+      onSeekTo: handlers.onSeekTo ?? ((sec) => this.seek(sec)),
     };
-    safeSet('play', () => {
-      if (this.onPlayCallback) this.onPlayCallback();
-      else void this.play();
-    });
-    safeSet('pause', () => {
-      if (this.onPauseCallback) this.onPauseCallback();
-      else this.pause();
-    });
-    safeSet('previoustrack', () => {
-      this.onPrevCallback?.();
-    });
-    safeSet('nexttrack', () => {
-      this.onNextCallback?.();
-    });
-    safeSet('seekto', (details) => {
-      if (typeof details.seekTime === 'number') {
-        if (this.onSeekToCallback) this.onSeekToCallback(details.seekTime);
-        else this.seek(details.seekTime);
-      }
-    });
-    safeSet('seekbackward', (details) => {
-      this.onSeekStepCallback?.(-(details.seekOffset || 15));
-    });
-    safeSet('seekforward', (details) => {
-      this.onSeekStepCallback?.(details.seekOffset || 15);
-    });
+    setMediaSessionHandlers(normalized);
   }
 
-  private async updateMediaSessionMetadata(track: Track): Promise<void> {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
-    const artwork: MediaImage[] = [];
-    if (track.artworkId) {
-      const artUrl = await db.getArtworkUrl(track.artworkId);
-      if (artUrl) {
-        artwork.push({ src: artUrl, sizes: '512x512' });
-      }
-    } else if (track.artworkUrl) {
-      artwork.push({ src: track.artworkUrl, sizes: '512x512' });
-    }
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        artwork,
-      });
-    } catch {
-      // Ignore environments without MediaMetadata constructor
-    }
+  async refreshMetadata(track: Track): Promise<void> {
+    if (this.deckTrackIds[this.activeDeckIndex] !== track.id) return;
+    await updateMediaSessionTrackMetadata(track);
   }
 
-  private updateMediaSessionPosition(): void {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
-    if (typeof navigator.mediaSession.setPositionState !== 'function') return;
+  private syncMediaSessionPosition(): void {
     const el = this.activeAudio;
-    const duration = Number.isFinite(el.duration) ? el.duration : 0;
-    if (duration <= 0) return;
-    try {
-      navigator.mediaSession.setPositionState({
-        duration,
-        playbackRate: el.playbackRate || 1,
-        position: Math.min(duration, Math.max(0, el.currentTime || 0)),
-      });
-    } catch {
-      // Ignore position range errors during transitions
+    const dur = Number.isFinite(el.duration) ? el.duration : 0;
+    if (dur > 0) {
+      updateMediaSessionPosition(el.currentTime || 0, dur, el.playbackRate || 1);
     }
   }
 
   private ensureWebAudioGraph(): void {
-    const needsDsp =
-      this.normalizationEnabled ||
-      this.equalizerSettings.enabled ||
-      Math.abs(this.equalizerSettings.bass) > 0.01 ||
-      Math.abs(this.equalizerSettings.mid) > 0.01 ||
-      Math.abs(this.equalizerSettings.treble) > 0.01;
+    const needsDsp = this.normalizationEnabled || this.equalizerSettings.enabled;
 
     if (!needsDsp || this.audioCtx || typeof window === 'undefined') return;
     const Ctx =
@@ -396,14 +465,60 @@ class SharedAudioEngine {
     this.deckFadeMultipliers[deckIndex] = 0;
   }
 
+  private async resolveHandleFile(trackId: string): Promise<File | null> {
+    const handle = await db.getFileHandle(trackId);
+    if (!handle) return null;
+
+    type PermissionCapableHandle = FileSystemFileHandle & {
+      queryPermission?: (desc: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+      requestPermission?: (desc: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+    };
+    const permHandle = handle as PermissionCapableHandle;
+
+    try {
+      if (typeof permHandle.queryPermission === 'function') {
+        const perm = await permHandle.queryPermission({ mode: 'read' });
+        if (perm !== 'granted' && typeof permHandle.requestPermission === 'function') {
+          const req = await permHandle.requestPermission({ mode: 'read' });
+          if (req !== 'granted') return null;
+        }
+      }
+      return await handle.getFile();
+    } catch {
+      return null;
+    }
+  }
+
   private async resolveTrackUrl(
     track: Track
-  ): Promise<{ srcUrl: string; objectUrl: string | null } | null> {
+  ): Promise<{ srcUrl: string; objectUrl: string | null; missingReason?: string } | null> {
+    if (track.source === 'filehandle') {
+      const file = await this.resolveHandleFile(track.id);
+      if (file) {
+        const objectUrl = URL.createObjectURL(file);
+        return { srcUrl: objectUrl, objectUrl };
+      }
+      return {
+        srcUrl: '',
+        objectUrl: null,
+        missingReason:
+          'Read permission or access to this original file expired. Relink or re-pick the file to resume.',
+      };
+    }
+
     const blob = await db.getAudioBlob(track.id);
     if (blob) {
       const objectUrl = URL.createObjectURL(blob);
       return { srcUrl: objectUrl, objectUrl };
     }
+
+    // Fallback check in case track has an associated handle regardless of source field
+    const fallbackFile = await this.resolveHandleFile(track.id);
+    if (fallbackFile) {
+      const objectUrl = URL.createObjectURL(fallbackFile);
+      return { srcUrl: objectUrl, objectUrl };
+    }
+
     if ((track.source === 'mediastore' || track.source === 'document') && track.contentUri) {
       try {
         const srcUrl = await resolveMediaStorePlayableUrl(track);
@@ -450,22 +565,27 @@ class SharedAudioEngine {
       this.deckPendingHandlers[idx] = null;
     }
 
+    bindNavigatorMediaSessionHandlers();
+
     if (this.deckTrackIds[idx] === track.id && el.getAttribute('src')) {
       if (startPosition > 0 && Math.abs(el.currentTime - startPosition) > 0.5) {
         this.seek(startPosition);
       }
       this.deckFadeMultipliers[idx] = 1;
       this.applyVolumes();
-      await this.updateMediaSessionMetadata(track);
+      await updateMediaSessionTrackMetadata(track);
       if (autoplay) return this.play();
+      setMediaSessionPlaybackState('paused');
       return true;
     }
 
     const resolved = await this.resolveTrackUrl(track);
-    if (!resolved) {
+    if (!resolved || !resolved.srcUrl) {
       this.releaseDeckUrl(idx);
       this.deckTrackIds[idx] = null;
-      this.emit('error', { message: 'Audio file is missing from local storage.' });
+      this.emit('error', {
+        message: resolved?.missingReason || 'Audio file is missing from local storage.',
+      });
       return false;
     }
 
@@ -479,12 +599,20 @@ class SharedAudioEngine {
     this.applyVolumes();
 
     this.attachStartPosition(idx, track.id, startPosition);
-    await this.updateMediaSessionMetadata(track);
+    await updateMediaSessionTrackMetadata(track);
 
     if (autoplay) {
       return this.play();
     }
+    setMediaSessionPlaybackState('paused');
     return true;
+  }
+
+  async forceReloadTrack(track: Track, positionSeconds: number, shouldPlay: boolean): Promise<void> {
+    const idx = this.activeDeckIndex;
+    if (this.deckTrackIds[idx] !== track.id) return;
+    this.cleanupDeck(idx);
+    await this.loadTrack(track, positionSeconds, shouldPlay);
   }
 
   async crossfadeToTrack(
@@ -496,21 +624,21 @@ class SharedAudioEngine {
       return this.loadTrack(track, startPosition, true);
     }
 
-    // Finalize any older fading deck before repurposing it as incoming
     if (this.crossfadeTimer !== null || this.fadeOutTimer !== null) {
       this.cancelCrossfade(true);
     }
 
     const resolved = await this.resolveTrackUrl(track);
-    if (!resolved) {
-      this.emit('error', { message: 'Audio file is missing from local storage.' });
+    if (!resolved || !resolved.srcUrl) {
+      this.emit('error', {
+        message: resolved?.missingReason || 'Audio file is missing from local storage.',
+      });
       return false;
     }
 
     const outgoingIdx: DeckIndex = this.activeDeckIndex;
     const incomingIdx: DeckIndex = outgoingIdx === 0 ? 1 : 0;
 
-    // Clear stale resources on incoming deck while outgoing continues uninterrupted
     this.cleanupDeck(incomingIdx);
     this.deckUrls[incomingIdx] = resolved.objectUrl;
     this.deckTrackIds[incomingIdx] = track.id;
@@ -522,7 +650,6 @@ class SharedAudioEngine {
     incomingEl.playbackRate = this.playbackRate;
     this.attachStartPosition(incomingIdx, track.id, startPosition);
 
-    // Switch active deck pointer immediately so UI progress/controls target the incoming track
     this.activeDeckIndex = incomingIdx;
     this.fadingOutgoingIndex = outgoingIdx;
     this.applyVolumes();
@@ -533,7 +660,6 @@ class SharedAudioEngine {
       }
       await incomingEl.play();
     } catch {
-      // Revert if play was blocked
       this.cleanupDeck(incomingIdx);
       this.activeDeckIndex = outgoingIdx;
       this.fadingOutgoingIndex = null;
@@ -543,7 +669,8 @@ class SharedAudioEngine {
       return false;
     }
 
-    void this.updateMediaSessionMetadata(track);
+    bindNavigatorMediaSessionHandlers();
+    void updateMediaSessionTrackMetadata(track);
 
     const fadeMs = Math.max(400, Math.round(crossfadeSeconds * 1000));
     const startedAt = Date.now();
@@ -552,7 +679,6 @@ class SharedAudioEngine {
       const elapsed = Date.now() - startedAt;
       const progress = Math.min(1, elapsed / fadeMs);
 
-      // Equal-power crossfade curve preserves perceived loudness
       this.deckFadeMultipliers[outgoingIdx] = Math.cos(progress * Math.PI * 0.5);
       this.deckFadeMultipliers[incomingIdx] = Math.sin(progress * Math.PI * 0.5);
       this.applyVolumes();
@@ -602,14 +728,21 @@ class SharedAudioEngine {
     if (!el.src) return false;
     this.deckFadeMultipliers[this.activeDeckIndex] = 1;
     this.applyVolumes();
+    bindNavigatorMediaSessionHandlers();
     try {
+      if (this.normalizationEnabled || this.equalizerSettings.enabled) {
+        this.ensureWebAudioGraph();
+      }
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         await this.audioCtx.resume();
       }
       await el.play();
+      setMediaSessionPlaybackState('playing');
+      this.syncMediaSessionPosition();
       return true;
     } catch {
       this.emit('playstate', { isPlaying: false });
+      setMediaSessionPlaybackState('paused');
       return false;
     }
   }
@@ -617,6 +750,8 @@ class SharedAudioEngine {
   pause(): void {
     this.cancelCrossfade(true);
     this.activeAudio.pause();
+    setMediaSessionPlaybackState('paused');
+    this.syncMediaSessionPosition();
   }
 
   seek(seconds: number): void {
@@ -627,7 +762,7 @@ class SharedAudioEngine {
     const target = Math.max(0, duration > 0 ? Math.min(duration, seconds) : seconds);
     el.currentTime = target;
     this.emit('timeupdate', { currentTime: target, duration });
-    this.updateMediaSessionPosition();
+    this.syncMediaSessionPosition();
   }
 
   setVolume(volume: number, muted = false): void {
@@ -640,12 +775,12 @@ class SharedAudioEngine {
     this.playbackRate = Math.max(0.5, Math.min(2, rate));
     this.decks[0].playbackRate = this.playbackRate;
     this.decks[1].playbackRate = this.playbackRate;
-    this.updateMediaSessionPosition();
+    this.syncMediaSessionPosition();
   }
 
   setVolumeNormalization(enabled: boolean): void {
     this.normalizationEnabled = enabled;
-    if (enabled) {
+    if (enabled && this.isPlaying()) {
       this.ensureWebAudioGraph();
     }
     this.applyDspParams();
@@ -653,7 +788,7 @@ class SharedAudioEngine {
 
   setEqualizer(eq: EqualizerSettings): void {
     this.equalizerSettings = { ...eq };
-    if (eq.enabled) {
+    if (eq.enabled && this.isPlaying()) {
       this.ensureWebAudioGraph();
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         void this.audioCtx.resume();

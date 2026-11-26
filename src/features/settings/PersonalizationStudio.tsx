@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Check,
   Disc3,
   Download,
@@ -18,6 +19,8 @@ import { useToast } from '../../app/ToastContext';
 import { useArtworkUrl } from '../../hooks/useDominantColor';
 import {
   BUILT_IN_PALETTES,
+  FONT_PRESETS,
+  getFontPresetMeta,
   getPalettesForTheme,
   getUiThemeMeta,
   resolveActivePalette,
@@ -39,8 +42,11 @@ import { GlassButton } from '../../components/glass/GlassButton';
 import { GlassCard } from '../../components/glass/GlassCard';
 import { GlassModal } from '../../components/glass/GlassModal';
 import { Slider } from '../../components/ui/slider';
+import { Switch } from '../../components/ui/switch';
 
-export const PersonalizationStudio: React.FC = () => {
+export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
+  onBack,
+}) => {
   const {
     settings,
     resolvedTheme,
@@ -56,6 +62,7 @@ export const PersonalizationStudio: React.FC = () => {
   const p = settings.personalization;
   const activeUiTheme = p.uiTheme || 'neo';
   const activeThemeMeta = getUiThemeMeta(activeUiTheme);
+  const activeFontMeta = getFontPresetMeta(p.fontStyle);
   const activePalette = resolveActivePalette(p);
   const bgImageUrl = useArtworkUrl(p.backgroundImageId);
 
@@ -94,6 +101,7 @@ export const PersonalizationStudio: React.FC = () => {
       activePaletteId: nextPaletteId,
       glassStyle: meta.defaultGlassStyle,
       cornerStyle: meta.defaultCornerStyle,
+      fontStyle: meta.defaultFontStyle,
     });
     showToast(`Switched to ${meta.name} theme`, 'success');
   };
@@ -191,13 +199,21 @@ export const PersonalizationStudio: React.FC = () => {
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Palette className="w-4 h-4" style={{ color: 'var(--neo-accent)' }} />
-          <div>
-            <h2 className="text-base font-semibold font-display">Personalization Studio</h2>
-            <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
-              Palettes, custom wallpapers, Liquid Glass materials, and typography
-            </p>
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <GlassButton size="sm" variant="ghost" onClick={onBack}>
+              <ArrowLeft className="w-4 h-4" />
+              <span>Settings</span>
+            </GlassButton>
+          )}
+          <div className="flex items-center gap-2">
+            <Palette className="w-4 h-4" style={{ color: 'var(--neo-accent)' }} />
+            <div>
+              <h2 className="text-base font-semibold font-display">Personalization Studio</h2>
+              <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
+                Design themes, color palettes, modern fonts, and custom backgrounds
+              </p>
+            </div>
           </div>
         </div>
 
@@ -262,7 +278,7 @@ export const PersonalizationStudio: React.FC = () => {
                 {activeThemeMeta.name} · {activePalette.name}
               </p>
               <p className="text-xs text-[#6E6E73] dark:text-[#AEAEB2] truncate">
-                {p.glassStyle} surface · {p.fontStyle} · {p.cornerStyle} corners
+                {activeFontMeta.name} · {p.cornerStyle} corners
               </p>
             </div>
           </div>
@@ -275,16 +291,16 @@ export const PersonalizationStudio: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 0: UI Design Theme (Neo Player, iOS, Material UI, Windows) */}
+      {/* Section 0: UI Design Theme (Neo Player, Material UI, Windows) */}
       <div className="space-y-3">
         <div>
           <p className="text-sm font-semibold">App Design Theme</p>
           <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
-            Choose your interface system and curated color palettes
+            Switch seamlessly between Neo Glass, Google Material Design 3, and Windows 11 Fluent
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {UI_THEMES.map((theme) => {
             const selected = activeUiTheme === theme.id;
             const themePalettes = getPalettesForTheme(theme.id);
@@ -294,17 +310,13 @@ export const PersonalizationStudio: React.FC = () => {
                 ? '8px'
                 : theme.id === 'material'
                   ? '22px'
-                  : theme.id === 'ios'
-                    ? '18px'
-                    : '20px';
+                  : '20px';
             const btnRadius =
               theme.id === 'windows'
                 ? '5px'
                 : theme.id === 'material'
                   ? '9999px'
-                  : theme.id === 'ios'
-                    ? '10px'
-                    : '12px';
+                  : '12px';
 
             return (
               <button
@@ -381,7 +393,7 @@ export const PersonalizationStudio: React.FC = () => {
             </p>
             <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
               {showAllThemePalettes
-                ? 'Showing palettes across Neo Player, iOS, Material UI, and Windows'
+                ? 'Showing palettes across Neo Player, Material UI, and Windows'
                 : `Curated accent & surface palettes tailored for ${activeThemeMeta.name}`}
             </p>
           </div>
@@ -468,6 +480,22 @@ export const PersonalizationStudio: React.FC = () => {
 
       {/* Section 2: Background Style & Custom Image */}
       <div className="space-y-4 pt-3 border-t border-black/8 dark:border-white/10">
+        <div className="p-3.5 neo-btn-radius liquid-glass-subtle flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Now Playing Album Art Background</p>
+            <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
+              Use the playing track&apos;s album artwork behind Now Playing, adapted to your Light/Dark mode and {activeThemeMeta.name} theme
+            </p>
+          </div>
+          <Switch
+            checked={p.nowPlayingArtworkBackground ?? true}
+            onCheckedChange={(checked) =>
+              void updatePersonalization({ nowPlayingArtworkBackground: checked })
+            }
+            aria-label="Now Playing album art background"
+          />
+        </div>
+
         <p className="text-sm font-semibold">App Background Style</p>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -752,46 +780,82 @@ export const PersonalizationStudio: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1">
-                <Type className="w-3.5 h-3.5" />
-                <span>Typography</span>
-              </p>
-              <select
-                aria-label="Interface font style"
-                value={p.fontStyle}
-                onChange={(e) =>
-                  void updatePersonalization({ fontStyle: e.target.value as FontStylePreset })
-                }
-                className="w-full min-h-[38px] px-3 rounded-xl liquid-glass-subtle text-xs font-medium cursor-pointer"
-              >
-                <option value="geometric">Geometric Sans</option>
-                <option value="editorial">Editorial Serif</option>
-                <option value="technical">Technical Mono</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1">
-                <Disc3 className="w-3.5 h-3.5" />
-                <span>Player Artwork</span>
-              </p>
-              <select
-                aria-label="Player artwork display style"
-                value={p.artworkStyle}
-                onChange={(e) =>
-                  void updatePersonalization({
-                    artworkStyle: e.target.value as ArtworkDisplayStyle,
-                  })
-                }
-                className="w-full min-h-[38px] px-3 rounded-xl liquid-glass-subtle text-xs font-medium cursor-pointer"
-              >
-                <option value="cover">Album Cover</option>
-                <option value="vinyl">Spinning Vinyl</option>
-              </select>
-            </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1">
+              <Disc3 className="w-3.5 h-3.5" />
+              <span>Player Artwork</span>
+            </p>
+            <select
+              aria-label="Player artwork display style"
+              value={p.artworkStyle}
+              onChange={(e) =>
+                void updatePersonalization({
+                  artworkStyle: e.target.value as ArtworkDisplayStyle,
+                })
+              }
+              className="w-full min-h-[38px] px-3 rounded-xl liquid-glass-subtle text-xs font-medium cursor-pointer"
+            >
+              <option value="cover">Album Cover</option>
+              <option value="vinyl">Spinning Vinyl</option>
+            </select>
           </div>
+        </div>
+      </div>
+
+      {/* Section 4: Modern Typography Gallery */}
+      <div className="space-y-3 pt-3 border-t border-black/8 dark:border-white/10">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold flex items-center gap-1.5">
+              <Type className="w-4 h-4 text-[var(--neo-accent)]" />
+              <span>Typography &amp; Modern Fonts</span>
+            </p>
+            <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
+              Select a modern font family across headings, lyrics, and interface labels
+            </p>
+          </div>
+          <span className="text-xs font-medium text-[#6E6E73] dark:text-[#98989D]">
+            {activeFontMeta.name}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {FONT_PRESETS.map((font) => {
+            const active = p.fontStyle === font.id;
+            return (
+              <button
+                key={font.id}
+                type="button"
+                onClick={() =>
+                  void updatePersonalization({ fontStyle: font.id as FontStylePreset })
+                }
+                className={cn(
+                  'p-3 neo-btn-radius liquid-glass-subtle text-left transition-all cursor-pointer flex items-center justify-between gap-2',
+                  active ? 'ring-2 ring-[var(--neo-accent)]' : 'hover:brightness-105'
+                )}
+              >
+                <div className="min-w-0">
+                  <p
+                    className="text-sm font-bold truncate"
+                    style={{ fontFamily: font.displayFont }}
+                  >
+                    {font.name}
+                  </p>
+                  <p
+                    className="text-[11px] text-[#6E6E73] dark:text-[#98989D] truncate mt-0.5"
+                    style={{ fontFamily: font.bodyFont }}
+                  >
+                    {font.tagline}
+                  </p>
+                </div>
+                {active && (
+                  <span className="w-5 h-5 rounded-full bg-[var(--neo-accent)] text-white flex items-center justify-center shrink-0">
+                    <Check className="w-3 h-3" />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 

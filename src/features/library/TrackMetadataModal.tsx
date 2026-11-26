@@ -1,8 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, CloudDownload, ImagePlus, Loader2, Sparkles, Trash2 } from 'lucide-react';
+import {
+  Check,
+  CloudDownload,
+  ExternalLink,
+  ImagePlus,
+  Link2,
+  Loader2,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { useLibrary } from '../../app/LibraryContext';
 import { useTheme } from '../../app/ThemeContext';
+import { isWebWritableTagFormat } from '../../lib/audioTagWriter';
 import { isNativeMediaStoreAvailable } from '../../plugins/mediaStore';
+import { isWebFileSystemAccessSupported } from '../../services/libraryService';
 import {
   downloadCoverBlob,
   extractSearchHints,
@@ -25,7 +36,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
   open,
   onOpenChange,
 }) => {
-  const { updateTrack, downloadLyricsForTrack } = useLibrary();
+  const { updateTrack, downloadLyricsForTrack, relinkTrackToOriginalFile } = useLibrary();
   const { settings } = useTheme();
   const artInputRef = useRef<HTMLInputElement | null>(null);
   const trackRef = useRef(track);
@@ -54,6 +65,8 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
   const [lookingUp, setLookingUp] = useState(false);
   const [applyingCandidate, setApplyingCandidate] = useState(false);
   const [downloadingLyrics, setDownloadingLyrics] = useState(false);
+  const [linkingOriginal, setLinkingOriginal] = useState(false);
+  const [iframeLinkBlocked, setIframeLinkBlocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lookupStatus, setLookupStatus] = useState<string | null>(null);
@@ -82,6 +95,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     setRemoveArtwork(false);
     setSaveError(null);
     setLookupStatus(null);
+    setIframeLinkBlocked(false);
     setCandidates([]);
     setSelectedCandidateId(null);
     setLookingUp(false);
@@ -100,17 +114,55 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
 
   if (!track) return null;
 
-  const tagFormatSupported = ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(
+  const hasNativeAndroid = isNativeMediaStoreAvailable();
+  const androidTagSupported = ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(
     track.format.toUpperCase()
   );
-  const canWriteEmbeddedTags =
-    isNativeMediaStoreAvailable() &&
+  const canWriteAndroidTags =
+    hasNativeAndroid &&
     Boolean(track.contentUri) &&
     (track.source === 'document' || track.source === 'mediastore') &&
-    tagFormatSupported;
-  const tagWriteHint = !canWriteEmbeddedTags
-    ? 'Tags and artwork save in Neo Player; re-import with Pick Editable Files to embed them'
-    : 'Saving embeds text tags, mood labels, and album artwork in the original file';
+    androidTagSupported;
+  const isWebFileLinked = track.source === 'filehandle';
+  const canWriteWebTags =
+    isWebFileLinked && isWebWritableTagFormat(track.format || track.fileName);
+  const canWriteEmbeddedTags = canWriteAndroidTags || canWriteWebTags;
+  const canOfferWebRelink =
+    !hasNativeAndroid &&
+    track.source !== 'filehandle' &&
+    track.source !== 'youtube' &&
+    isWebFileSystemAccessSupported();
+
+  const tagWriteHint = canWriteEmbeddedTags
+    ? 'Saving embeds text tags, mood labels, and album artwork in the original file'
+    : isWebFileLinked
+      ? `Linked to original file (inline tag writing supports MP3, FLAC, M4A/MP4, WAV)`
+      : hasNativeAndroid
+        ? 'Tags and artwork save in Neo Player; re-import with Pick Editable Files to embed them'
+        : 'App copy — link the original file below to edit tags & cover directly on disk';
+
+  const handleLinkOriginalFile = async () => {
+    if (linkingOriginal || saving) return;
+    setLinkingOriginal(true);
+    setSaveError(null);
+    setIframeLinkBlocked(false);
+    try {
+      const res = await relinkTrackToOriginalFile(track.id);
+      if (res.iframeBlocked) {
+        setIframeLinkBlocked(true);
+      } else if (res.track) {
+        setLookupStatus(
+          'Linked to original file and removed duplicate app copy. Save Changes to write tags directly to disk.'
+        );
+      }
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'Unable to link the original audio file.'
+      );
+    } finally {
+      setLinkingOriginal(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -368,6 +420,20 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {canOfferWebRelink && (
+              <GlassButton
+                size="sm"
+                disabled={linkingOriginal || saving}
+                onClick={() => void handleLinkOriginalFile()}
+              >
+                {linkingOriginal ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5 text-[var(--neo-accent)]" />
+                )}
+                <span>{linkingOriginal ? 'Linking...' : 'Link Original File'}</span>
+              </GlassButton>
+            )}
             <GlassButton
               size="sm"
               variant="accent"
@@ -395,6 +461,23 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
             </GlassButton>
           </div>
         </div>
+
+        {iframeLinkBlocked && (
+          <div className="text-xs liquid-glass-subtle rounded-xl px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[#48484A] dark:text-[#AEAEB2]">
+              Original file linking is blocked inside the preview frame.
+            </span>
+            <a
+              href={typeof window !== 'undefined' ? window.location.href : '/'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-semibold text-[var(--neo-accent)] hover:underline"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open in New Tab</span>
+            </a>
+          </div>
+        )}
 
         {lookupStatus && (
           <p className="text-xs text-[#6E6E73] dark:text-[#98989D] liquid-glass-subtle rounded-xl px-3 py-2">

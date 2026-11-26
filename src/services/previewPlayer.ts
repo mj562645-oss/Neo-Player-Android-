@@ -1,6 +1,12 @@
+import {
+  bindNavigatorMediaSessionHandlers,
+  setMediaSessionPlaybackState,
+  updateMediaSessionPosition,
+  updateMediaSessionTrackMetadata,
+} from '../lib/mediaSession';
+import type { DiscoveryTrackItem } from '../types/music';
 import { audioEngine } from './audioEngine';
 import { youtubePlayer } from './youtubePlayer';
-import type { DiscoveryTrackItem } from '../types/music';
 
 export interface PreviewPlayerState {
   currentTrack: DiscoveryTrackItem | null;
@@ -17,6 +23,8 @@ type Listener = (state: PreviewPlayerState) => void;
 class DiscoveryPreviewPlayer {
   private audio: HTMLAudioElement;
   private listeners = new Set<Listener>();
+  private volume = 0.85;
+  private muted = false;
   private state: PreviewPlayerState = {
     currentTrack: null,
     stationLabel: '',
@@ -30,12 +38,14 @@ class DiscoveryPreviewPlayer {
   constructor() {
     this.audio = new Audio();
     this.audio.preload = 'auto';
+    this.audio.setAttribute('playsinline', '');
+    this.audio.volume = this.volume;
 
     this.audio.addEventListener('timeupdate', () => {
-      this.update({
-        currentTime: this.audio.currentTime || 0,
-        duration: Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : 30,
-      });
+      const ct = this.audio.currentTime || 0;
+      const dur = Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : 30;
+      this.update({ currentTime: ct, duration: dur });
+      updateMediaSessionPosition(ct, dur, 1);
     });
 
     this.audio.addEventListener('play', () => {
@@ -45,10 +55,15 @@ class DiscoveryPreviewPlayer {
       if (youtubePlayer.isPlaying()) {
         youtubePlayer.pause();
       }
+      this.bindPreviewMediaSession();
+      setMediaSessionPlaybackState('playing');
       this.update({ isPlaying: true });
     });
 
     this.audio.addEventListener('pause', () => {
+      if (this.state.currentTrack) {
+        setMediaSessionPlaybackState('paused');
+      }
       this.update({ isPlaying: false });
     });
 
@@ -60,13 +75,65 @@ class DiscoveryPreviewPlayer {
     audioEngine.on('playstate', ({ isPlaying }) => {
       if (isPlaying && !this.audio.paused) {
         this.audio.pause();
+        bindNavigatorMediaSessionHandlers();
       }
     });
     youtubePlayer.on('playstate', ({ isPlaying }) => {
       if (isPlaying && !this.audio.paused) {
         this.audio.pause();
+        bindNavigatorMediaSessionHandlers();
       }
     });
+  }
+
+  private bindPreviewMediaSession(): void {
+    const track = this.state.currentTrack;
+    if (!track) return;
+    void updateMediaSessionTrackMetadata({
+      title: track.title,
+      artist: track.artist,
+      album: track.album || this.state.stationLabel || 'Music Radar Preview',
+      artworkUrl: track.artworkUrl,
+    });
+    bindNavigatorMediaSessionHandlers({
+      onPlay: () => void this.togglePlay(),
+      onPause: () => {
+        if (!this.audio.paused) this.audio.pause();
+      },
+      onNext: () => void this.next(),
+      onPrev: () => void this.prev(),
+      onSeekTo: (sec) => {
+        if (this.audio.src && Number.isFinite(sec)) {
+          this.audio.currentTime = Math.max(0, Math.min(this.state.duration, sec));
+        }
+      },
+      onSeekStep: (delta) => {
+        if (this.audio.src) {
+          this.audio.currentTime = Math.max(
+            0,
+            Math.min(this.state.duration, (this.audio.currentTime || 0) + delta)
+          );
+        }
+      },
+    });
+  }
+
+  setVolume(volume: number, muted = false): void {
+    this.volume = Math.max(0, Math.min(1, volume));
+    this.muted = muted;
+    this.audio.volume = this.muted ? 0 : this.volume;
+  }
+
+  async setAudioOutputDevice(deviceId: string): Promise<void> {
+    const el = this.audio as HTMLAudioElement & {
+      setSinkId?: (id: string) => Promise<void>;
+    };
+    if (typeof el.setSinkId !== 'function') return;
+    try {
+      await el.setSinkId(deviceId || '');
+    } catch {
+      // Ignore unsupported or unavailable audio sink
+    }
   }
 
   subscribe(fn: Listener): () => void {
@@ -125,6 +192,7 @@ class DiscoveryPreviewPlayer {
       youtubePlayer.pause();
     }
     this.audio.src = track.previewUrl;
+    this.audio.volume = this.muted ? 0 : this.volume;
     this.audio.currentTime = 0;
     this.update({
       currentTrack: track,
@@ -134,6 +202,7 @@ class DiscoveryPreviewPlayer {
       currentTime: 0,
       duration: 30,
     });
+    this.bindPreviewMediaSession();
     try {
       await this.audio.play();
       return true;
@@ -148,6 +217,7 @@ class DiscoveryPreviewPlayer {
     if (this.audio.paused) {
       if (audioEngine.isPlaying()) audioEngine.pause();
       if (youtubePlayer.isPlaying()) youtubePlayer.pause();
+      this.bindPreviewMediaSession();
       try {
         await this.audio.play();
       } catch {
@@ -192,6 +262,7 @@ class DiscoveryPreviewPlayer {
       currentTime: 0,
       duration: 30,
     });
+    bindNavigatorMediaSessionHandlers();
   }
 }
 

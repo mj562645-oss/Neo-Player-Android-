@@ -54,7 +54,7 @@ export interface Track {
   playCount: number;
   lastPosition?: number;
   moodTags?: string[];
-  source?: 'indexeddb' | 'mediastore' | 'document' | 'youtube';
+  source?: 'indexeddb' | 'filehandle' | 'mediastore' | 'document' | 'youtube';
   mediaStoreId?: string;
   contentUri?: string;
   /** App-private file URI used by Android Media3 for persistent local playback. */
@@ -124,7 +124,7 @@ export interface LyricsDocument {
   updatedAt: number;
 }
 
-export type UiThemeId = 'neo' | 'ios' | 'material' | 'windows';
+export type UiThemeId = 'neo' | 'material' | 'windows';
 
 export interface AppPalette {
   id: string;
@@ -137,7 +137,16 @@ export interface AppPalette {
 
 export type BackgroundStyleMode = 'ambient' | 'artwork' | 'gradient' | 'image';
 export type GlassStylePreset = 'frosted' | 'clear' | 'tinted' | 'solid';
-export type FontStylePreset = 'geometric' | 'editorial' | 'technical';
+export type FontStylePreset =
+  | 'geometric'
+  | 'inter'
+  | 'outfit'
+  | 'grotesk'
+  | 'sora'
+  | 'material'
+  | 'fluent'
+  | 'editorial'
+  | 'technical';
 export type CornerRadiusPreset = 'sharp' | 'balanced' | 'pillowy';
 export type ArtworkDisplayStyle = 'cover' | 'vinyl';
 
@@ -158,6 +167,7 @@ export interface PersonalizationSettings {
   cornerStyle: CornerRadiusPreset;
   fontStyle: FontStylePreset;
   artworkStyle: ArtworkDisplayStyle;
+  nowPlayingArtworkBackground: boolean;
 }
 
 export interface EqualizerSettings {
@@ -197,6 +207,9 @@ export interface UserSettings {
   notifyTrending: boolean;
   notifyFavoriteArtists: boolean;
   osNotificationsEnabled: boolean;
+  audioOutputDeviceId: string;
+  pauseOnBluetoothDisconnect: boolean;
+  bluetoothMetadataSync: boolean;
   personalization: PersonalizationSettings;
 }
 

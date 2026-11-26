@@ -8,7 +8,9 @@ import React, {
   useState,
 } from 'react';
 import { parseLrc } from '../lib/lrcParser';
+import { isWebWritableTagFormat, writeAudioTagsToBlob } from '../lib/audioTagWriter';
 import { sanitizeText } from '../lib/format';
+import { invalidateArtworkDataUrlCache } from '../lib/mediaSession';
 import { createId } from '../lib/utils';
 import {
   MediaStore,
@@ -27,9 +29,14 @@ import {
   calculateStorageBreakdown,
   deriveAlbums,
   deriveArtists,
-  importDocumentTracks,
   importAudioFiles,
+  importDocumentTracks,
+  importFileHandles,
   importMediaStoreTracks,
+  isSupportedAudioFile,
+  isWebFileSystemAccessSupported,
+  pickOriginalAudioFilesWeb,
+  pickOriginalDirectoryFilesWeb,
   removeTrackArtwork,
   replaceTrackArtwork,
   updateTrackInfo,
@@ -44,6 +51,12 @@ import type {
   Track,
 } from '../types/music';
 import { useToast } from './ToastContext';
+
+type WritableFileHandle = FileSystemFileHandle & {
+  queryPermission?: (desc?: { mode?: 'read' | 'readwrite' }) => Promise<PermissionState>;
+  requestPermission?: (desc?: { mode?: 'read' | 'readwrite' }) => Promise<PermissionState>;
+  createWritable: () => Promise<FileSystemWritableFileStream>;
+};
 
 interface ImportProgress {
   active: boolean;
@@ -82,6 +95,11 @@ interface LibraryContextValue {
   enrichProgress: EnrichProgress;
   importFiles: (files: FileList | File[]) => Promise<Track[]>;
   pickAndImportAudioFiles: () => Promise<Track[]>;
+  pickAndLinkOriginalFiles: () => Promise<{ tracks: Track[]; iframeBlocked?: boolean }>;
+  pickAndLinkOriginalFolder: () => Promise<{ tracks: Track[]; iframeBlocked?: boolean }>;
+  relinkTrackToOriginalFile: (
+    trackId: string
+  ) => Promise<{ track: Track | null; iframeBlocked?: boolean }>;
   scanDeviceMediaStore: (options?: MediaStoreScanOptions) => Promise<Track[]>;
   downloadLyricsForTrack: (
     trackId: string,
@@ -210,7 +228,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (files.length === 0) return [];
 
       setImportProgress({ active: true, done: 0, total: files.length, currentFile: files[0].name });
-      const result = await importAudioFiles(files, tracks, (done, total, currentFile) => {
+      const result = await importAudioFiles(files, tracksRef.current, (done, total, currentFile) => {
         setImportProgress({ active: done < total, done, total, currentFile });
       });
       setImportProgress({ active: false, done: 0, total: 0, currentFile: '' });
@@ -263,7 +281,172 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       return result.importedTracks;
     },
-    [tracks, showToast]
+    [showToast]
+  );
+
+  const importPickedFileHandles = useCallback(
+    async (handles: FileSystemFileHandle[]): Promise<Track[]> => {
+      if (handles.length === 0) return [];
+      setImportProgress({
+        active: true,
+        done: 0,
+        total: handles.length,
+        currentFile: handles[0].name,
+      });
+      const result = await importFileHandles(
+        handles,
+        tracksRef.current,
+        (done, total, currentFile) => {
+          setImportProgress({ active: done < total, done, total, currentFile });
+        }
+      );
+      setImportProgress({ active: false, done: 0, total: 0, currentFile: '' });
+
+      if (result.importedTracks.length > 0) {
+        setTracks((prev) =>
+          [...result.importedTracks, ...prev].sort((a, b) => b.addedAt - a.addedAt)
+        );
+        const allLyrics = await db.getAllLyrics();
+        const nextMap: Record<string, LyricsDocument> = {};
+        for (const doc of allLyrics) nextMap[doc.trackId] = doc;
+        setLyricsMap(nextMap);
+        showToast(
+          `Linked ${result.importedTracks.length} original track${result.importedTracks.length === 1 ? '' : 's'} (zero duplicate copy)`,
+          'success'
+        );
+
+        try {
+          const currentSettings = await db.getSettings();
+          if (currentSettings.autoEnrichOnImport) {
+            void runBatchEnrichment(
+              result.importedTracks.map((t) => t.id),
+              {
+                mode: 'missing-only',
+                fetchMetadata: true,
+                fetchCover: true,
+                fetchLyrics: true,
+              },
+              result.importedTracks
+            );
+          }
+        } catch (error) {
+          showToast(
+            error instanceof Error ? error.message : 'Unable to start automatic metadata lookup.',
+            'error'
+          );
+        }
+      }
+
+      if (result.quotaError) {
+        showToast(result.quotaError, 'error');
+      } else if (result.skippedFiles.length > 0 && result.importedTracks.length === 0) {
+        showToast(
+          `Skipped ${result.skippedFiles.length} file(s): ${result.skippedFiles[0].reason}`,
+          'info'
+        );
+      } else if (result.skippedFiles.length > 0) {
+        showToast(`Skipped ${result.skippedFiles.length} duplicate or unsupported file(s)`, 'info');
+      }
+
+      return result.importedTracks;
+    },
+    [showToast]
+  );
+
+  const pickAndLinkOriginalFiles = useCallback(async (): Promise<{
+    tracks: Track[];
+    iframeBlocked?: boolean;
+  }> => {
+    if (!isWebFileSystemAccessSupported()) {
+      showToast('Original file linking requires a modern desktop/Android Chromium browser.', 'info');
+      return { tracks: [] };
+    }
+    try {
+      const picked = await pickOriginalAudioFilesWeb(true);
+      if (picked.iframeBlocked) {
+        showToast(
+          'Open Neo Player in a full browser tab to link & edit original disk files.',
+          'info'
+        );
+        return { tracks: [], iframeBlocked: true };
+      }
+      if (picked.cancelled || picked.handles.length === 0) return { tracks: [] };
+      const imported = await importPickedFileHandles(picked.handles);
+      return { tracks: imported };
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'Unable to open file picker.',
+        'error'
+      );
+      return { tracks: [] };
+    }
+  }, [importPickedFileHandles, showToast]);
+
+  const pickAndLinkOriginalFolder = useCallback(async (): Promise<{
+    tracks: Track[];
+    iframeBlocked?: boolean;
+  }> => {
+    if (!isWebFileSystemAccessSupported()) {
+      showToast('Folder linking requires a modern Chromium browser.', 'info');
+      return { tracks: [] };
+    }
+    try {
+      const picked = await pickOriginalDirectoryFilesWeb();
+      if (picked.iframeBlocked) {
+        showToast(
+          'Open Neo Player in a full browser tab to link & edit an entire music folder.',
+          'info'
+        );
+        return { tracks: [], iframeBlocked: true };
+      }
+      if (picked.cancelled) return { tracks: [] };
+      if (picked.handles.length === 0) {
+        showToast('No supported audio files found in that folder.', 'info');
+        return { tracks: [] };
+      }
+      const imported = await importPickedFileHandles(picked.handles);
+      return { tracks: imported };
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'Unable to open folder picker.',
+        'error'
+      );
+      return { tracks: [] };
+    }
+  }, [importPickedFileHandles, showToast]);
+
+  const relinkTrackToOriginalFile = useCallback(
+    async (
+      trackId: string
+    ): Promise<{ track: Track | null; iframeBlocked?: boolean }> => {
+      const target = tracksRef.current.find((t) => t.id === trackId);
+      if (!target) throw new Error('This track is no longer in the library.');
+      const picked = await pickOriginalAudioFilesWeb(false);
+      if (picked.iframeBlocked) {
+        return { track: null, iframeBlocked: true };
+      }
+      if (picked.cancelled || picked.handles.length === 0) {
+        return { track: null };
+      }
+      const handle = picked.handles[0];
+      const file = await handle.getFile();
+      if (!isSupportedAudioFile(file)) {
+        throw new Error('Selected file is not a supported audio format.');
+      }
+      await db.putFileHandle(trackId, handle);
+      const updated: Track = {
+        ...target,
+        source: 'filehandle',
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || target.mimeType,
+      };
+      await db.putTrack(updated);
+      setTracks((prev) => prev.map((t) => (t.id === trackId ? updated : t)));
+      showToast(`Linked "${updated.title}" to original file (app copy removed)`, 'success');
+      return { track: updated };
+    },
+    [showToast]
   );
 
   const pickAndImportAudioFiles = useCallback(async () => {
@@ -473,33 +656,78 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       >,
       options?: TrackEditOptions
     ) => {
-      const target = tracks.find((t) => t.id === trackId);
+      const target = tracksRef.current.find((t) => t.id === trackId);
       if (!target) throw new Error('This track is no longer in the library.');
-      const canWriteEmbeddedTags =
+
+      const tagsPayload = {
+        title: patch.title ?? target.title,
+        artist: patch.artist ?? target.artist,
+        album: patch.album ?? target.album,
+        albumArtist: patch.albumArtist ?? target.albumArtist,
+        genre: patch.genre ?? target.genre,
+        year: patch.year,
+        trackNumber: patch.trackNumber,
+        mood: options?.moodTagNames?.join('; '),
+      };
+      const artworkPayload = {
+        file: options?.artworkFile,
+        remove: options?.removeArtwork,
+      };
+
+      let wroteOriginalFile = false;
+      let nextFileSize = target.fileSize;
+
+      const canWriteAndroidEmbeddedTags =
         isNativeMediaStoreAvailable() &&
         Boolean(target.contentUri) &&
         (target.source === 'document' || target.source === 'mediastore') &&
         ['MP3', 'M4A', 'MP4', 'FLAC', 'OGG', 'WAV'].includes(target.format.toUpperCase());
-      if (canWriteEmbeddedTags) {
-        await writeTrackTags(
-          target,
-          {
-            title: patch.title ?? target.title,
-            artist: patch.artist ?? target.artist,
-            album: patch.album ?? target.album,
-            albumArtist: patch.albumArtist ?? target.albumArtist,
-            genre: patch.genre ?? target.genre,
-            year: patch.year,
-            trackNumber: patch.trackNumber,
-            mood: options?.moodTagNames?.join('; '),
-          },
-          {
-            file: options?.artworkFile,
-            remove: options?.removeArtwork,
+
+      if (canWriteAndroidEmbeddedTags) {
+        await writeTrackTags(target, tagsPayload, artworkPayload);
+        wroteOriginalFile = true;
+      } else if (isWebWritableTagFormat(target.format || target.fileName)) {
+        const storedHandle = await db.getFileHandle(trackId);
+        if (storedHandle) {
+          const writableHandle = storedHandle as WritableFileHandle;
+          let perm = writableHandle.queryPermission
+            ? await writableHandle.queryPermission({ mode: 'readwrite' })
+            : ('granted' as PermissionState);
+          if (perm !== 'granted' && writableHandle.requestPermission) {
+            perm = await writableHandle.requestPermission({ mode: 'readwrite' });
           }
-        );
+          if (perm !== 'granted') {
+            throw new Error(
+              'Write permission was denied for the original audio file. Allow file editing access and try again.'
+            );
+          }
+          const originalFile = await writableHandle.getFile();
+          const updatedBlob = await writeAudioTagsToBlob(
+            originalFile,
+            target.fileName || originalFile.name,
+            target.format || '',
+            tagsPayload,
+            artworkPayload
+          );
+          const writable = await writableHandle.createWritable();
+          try {
+            await writable.write(updatedBlob);
+          } finally {
+            await writable.close();
+          }
+          nextFileSize = updatedBlob.size;
+          wroteOriginalFile = true;
+        }
       }
-      let updated = await updateTrackInfo(target, patch);
+
+      if (options?.artworkFile || options?.removeArtwork) {
+        invalidateArtworkDataUrlCache(target.artworkId);
+      }
+
+      let updated = await updateTrackInfo(
+        { ...target, fileSize: nextFileSize },
+        patch
+      );
       if (options?.artworkFile) {
         updated = await replaceTrackArtwork(
           updated,
@@ -512,13 +740,15 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
       setTracks((prev) => prev.map((t) => (t.id === trackId ? updated : t)));
       showToast(
-        canWriteEmbeddedTags
+        wroteOriginalFile
           ? 'Track tags, moods, and cover saved to the original file'
-          : 'Track tags, moods, and cover saved in Neo Player only. Re-import with Pick Editable Files to update the original file.',
-        canWriteEmbeddedTags ? 'success' : 'info'
+          : target.source === 'filehandle'
+            ? `Saved in Neo Player (${target.format} inline tag writing is not supported on Web yet)`
+            : 'Saved in Neo Player only. Link the original file to edit tags directly on disk.',
+        wroteOriginalFile ? 'success' : 'info'
       );
     },
-    [tracks, showToast]
+    [showToast]
   );
 
   useEffect(() => {
@@ -529,24 +759,31 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateTrackArtwork = useCallback(
     async (trackId: string, imageFile: File) => {
-      const target = tracks.find((t) => t.id === trackId);
+      const target = tracksRef.current.find((t) => t.id === trackId);
       if (!target) return;
-      const updated = await replaceTrackArtwork(target, imageFile, tracks, playlists);
+      invalidateArtworkDataUrlCache(target.artworkId);
+      const updated = await replaceTrackArtwork(
+        target,
+        imageFile,
+        tracksRef.current,
+        playlistsRef.current
+      );
       setTracks((prev) => prev.map((t) => (t.id === trackId ? updated : t)));
       showToast('Album artwork updated', 'success');
     },
-    [tracks, playlists, showToast]
+    [showToast]
   );
 
   const deleteTrackArtwork = useCallback(
     async (trackId: string) => {
-      const target = tracks.find((t) => t.id === trackId);
+      const target = tracksRef.current.find((t) => t.id === trackId);
       if (!target) return;
-      const updated = await removeTrackArtwork(target, tracks, playlists);
+      invalidateArtworkDataUrlCache(target.artworkId);
+      const updated = await removeTrackArtwork(target, tracksRef.current, playlistsRef.current);
       setTracks((prev) => prev.map((t) => (t.id === trackId ? updated : t)));
       showToast('Album artwork removed', 'info');
     },
-    [tracks, playlists, showToast]
+    [showToast]
   );
 
   const deleteTracks = useCallback(
@@ -1161,6 +1398,9 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         enrichProgress,
         importFiles,
         pickAndImportAudioFiles,
+        pickAndLinkOriginalFiles,
+        pickAndLinkOriginalFolder,
+        relinkTrackToOriginalFile,
         scanDeviceMediaStore,
         downloadLyricsForTrack,
         enrichTrack,

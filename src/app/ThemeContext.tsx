@@ -1,13 +1,16 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { setMediaSessionMetadataSyncEnabled } from '../lib/mediaSession';
 import {
   applyPersonalizationCssVars,
   DEFAULT_PERSONALIZATION,
   getPalettesForTheme,
 } from '../lib/palettes';
 import { createId } from '../lib/utils';
+import NativeAudio, { isNativeAudioAvailable } from '../plugins/nativeAudio';
 import { syncAndroidStatusBar } from '../services/androidPlatform';
 import { audioEngine } from '../services/audioEngine';
 import { db, DEFAULT_USER_SETTINGS } from '../services/db';
+import { previewPlayer } from '../services/previewPlayer';
 import { youtubePlayer } from '../services/youtubePlayer';
 import type {
   AppPalette,
@@ -44,6 +47,53 @@ function resolveSystemTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function syncAudioOptionsToEngines(next: UserSettings, fullSync = false, patch?: Partial<UserSettings>): void {
+  if (fullSync || patch?.volume !== undefined || patch?.muted !== undefined) {
+    audioEngine.setVolume(next.volume, next.muted);
+    youtubePlayer.setVolume(next.volume, next.muted);
+    previewPlayer.setVolume(next.volume, next.muted);
+  }
+  if (fullSync || patch?.playbackRate !== undefined) {
+    audioEngine.setPlaybackRate(next.playbackRate);
+    youtubePlayer.setPlaybackRate(next.playbackRate);
+  }
+  if (fullSync || patch?.volumeNormalization !== undefined) {
+    audioEngine.setVolumeNormalization(next.volumeNormalization);
+  }
+  if (fullSync || patch?.equalizer !== undefined) {
+    audioEngine.setEqualizer(next.equalizer);
+  }
+  if (fullSync || patch?.audioOutputDeviceId !== undefined) {
+    void audioEngine.setAudioOutputDevice(next.audioOutputDeviceId || '');
+    void previewPlayer.setAudioOutputDevice(next.audioOutputDeviceId || '');
+  }
+  if (fullSync || patch?.bluetoothMetadataSync !== undefined) {
+    setMediaSessionMetadataSyncEnabled(next.bluetoothMetadataSync ?? true);
+  }
+  if (
+    isNativeAudioAvailable() &&
+    (fullSync ||
+      patch?.volume !== undefined ||
+      patch?.muted !== undefined ||
+      patch?.playbackRate !== undefined ||
+      patch?.volumeNormalization !== undefined ||
+      patch?.pauseOnBluetoothDisconnect !== undefined ||
+      patch?.equalizer !== undefined)
+  ) {
+    void NativeAudio.setPlaybackOptions({
+      volume: next.volume,
+      muted: next.muted,
+      playbackRate: next.playbackRate,
+      volumeNormalization: next.volumeNormalization,
+      pauseOnBluetoothDisconnect: next.pauseOnBluetoothDisconnect ?? true,
+      eqEnabled: next.equalizer.enabled,
+      eqBass: next.equalizer.bass,
+      eqMid: next.equalizer.mid,
+      eqTreble: next.equalizer.treble,
+    });
+  }
+}
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<UserSettings>(() => {
     const savedTheme =
@@ -63,6 +113,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       hasSeenIntro: seenIntro,
     };
   });
+  const settingsRef = useRef<UserSettings>(settings);
+  settingsRef.current = settings;
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(resolveSystemTheme);
 
@@ -80,17 +132,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let active = true;
     db.getSettings().then((loaded) => {
       if (!active) return;
+      settingsRef.current = loaded;
       setSettings(loaded);
       try {
         localStorage.setItem('neo-player-theme', loaded.theme);
       } catch {
         // ignore storage errors
       }
-      audioEngine.setVolume(loaded.volume, loaded.muted);
-      audioEngine.setPlaybackRate(loaded.playbackRate);
-      youtubePlayer.setVolume(loaded.muted ? 0 : loaded.volume);
-      audioEngine.setVolumeNormalization(loaded.volumeNormalization);
-      audioEngine.setEqualizer(loaded.equalizer);
+      syncAudioOptionsToEngines(loaded, true);
       setSettingsLoaded(true);
     });
     return () => {
@@ -115,48 +164,35 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [resolvedTheme, settings.theme, settings.personalization]);
 
   const updateSettings = useCallback(async (patch: Partial<UserSettings>) => {
-    setSettings((prev) => {
-      const next: UserSettings = { ...prev, ...patch, id: 'user_settings' };
-      void db.putSettings(next);
-      if (patch.hasSeenIntro !== undefined) {
-        try {
-          localStorage.setItem('neo-player-intro-seen', String(patch.hasSeenIntro));
-        } catch {
-          // ignore
-        }
+    const next: UserSettings = { ...settingsRef.current, ...patch, id: 'user_settings' };
+    settingsRef.current = next;
+    setSettings(next);
+    if (patch.hasSeenIntro !== undefined) {
+      try {
+        localStorage.setItem('neo-player-intro-seen', String(patch.hasSeenIntro));
+      } catch {
+        // ignore
       }
-      if (patch.volume !== undefined || patch.muted !== undefined) {
-        audioEngine.setVolume(next.volume, next.muted);
-        youtubePlayer.setVolume(next.muted ? 0 : next.volume);
-      }
-      if (patch.playbackRate !== undefined) {
-        audioEngine.setPlaybackRate(next.playbackRate);
-      }
-      if (patch.volumeNormalization !== undefined) {
-        audioEngine.setVolumeNormalization(next.volumeNormalization);
-      }
-      if (patch.equalizer !== undefined) {
-        audioEngine.setEqualizer(next.equalizer);
-      }
-      return next;
-    });
+    }
+    syncAudioOptionsToEngines(next, false, patch);
+    await db.putSettings(next);
   }, []);
 
   const updateEqualizer = useCallback(async (patch: Partial<EqualizerSettings>) => {
-    setSettings((prev) => {
-      const nextEq: EqualizerSettings = {
-        ...prev.equalizer,
-        ...patch,
-      };
-      const next: UserSettings = {
-        ...prev,
-        equalizer: nextEq,
-        id: 'user_settings',
-      };
-      void db.putSettings(next);
-      audioEngine.setEqualizer(nextEq);
-      return next;
-    });
+    const prev = settingsRef.current;
+    const nextEq: EqualizerSettings = {
+      ...prev.equalizer,
+      ...patch,
+    };
+    const next: UserSettings = {
+      ...prev,
+      equalizer: nextEq,
+      id: 'user_settings',
+    };
+    settingsRef.current = next;
+    setSettings(next);
+    syncAudioOptionsToEngines(next, false, { equalizer: nextEq });
+    await db.putSettings(next);
   }, []);
 
   const setTheme = useCallback(
@@ -166,76 +202,73 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [updateSettings]
   );
 
-  const updatePersonalization = useCallback(
-    async (patch: Partial<PersonalizationSettings>) => {
-      setSettings((prev) => {
-        const nextPersonalization: PersonalizationSettings = {
-          ...prev.personalization,
-          ...patch,
-        };
-        const next: UserSettings = {
-          ...prev,
-          personalization: nextPersonalization,
-          id: 'user_settings',
-        };
-        void db.putSettings(next);
-        return next;
-      });
-    },
-    []
-  );
+  const updatePersonalization = useCallback(async (patch: Partial<PersonalizationSettings>) => {
+    const prev = settingsRef.current;
+    const nextPersonalization: PersonalizationSettings = {
+      ...prev.personalization,
+      ...patch,
+    };
+    const next: UserSettings = {
+      ...prev,
+      personalization: nextPersonalization,
+      id: 'user_settings',
+    };
+    settingsRef.current = next;
+    setSettings(next);
+    await db.putSettings(next);
+  }, []);
 
   const upsertCustomPalette = useCallback(async (palette: AppPalette) => {
-    setSettings((prev) => {
-      const existing = prev.personalization.customPalettes || [];
-      const has = existing.some((p) => p.id === palette.id);
-      const nextCustom = has
-        ? existing.map((p) => (p.id === palette.id ? palette : p))
-        : [...existing, palette];
-      const next: UserSettings = {
-        ...prev,
-        personalization: {
-          ...prev.personalization,
-          customPalettes: nextCustom,
-          activePaletteId: palette.id,
-        },
-        id: 'user_settings',
-      };
-      void db.putSettings(next);
-      return next;
-    });
+    const prev = settingsRef.current;
+    const existing = prev.personalization.customPalettes || [];
+    const has = existing.some((p) => p.id === palette.id);
+    const nextCustom = has
+      ? existing.map((p) => (p.id === palette.id ? palette : p))
+      : [...existing, palette];
+    const next: UserSettings = {
+      ...prev,
+      personalization: {
+        ...prev.personalization,
+        customPalettes: nextCustom,
+        activePaletteId: palette.id,
+      },
+      id: 'user_settings',
+    };
+    settingsRef.current = next;
+    setSettings(next);
+    await db.putSettings(next);
   }, []);
 
   const deleteCustomPalette = useCallback(async (paletteId: string) => {
-    setSettings((prev) => {
-      const nextCustom = (prev.personalization.customPalettes || []).filter(
-        (p) => p.id !== paletteId
-      );
-      const themeFallback =
-        getPalettesForTheme(prev.personalization.uiTheme || 'neo')[0]?.id ||
-        DEFAULT_PERSONALIZATION.activePaletteId;
-      const nextActive =
-        prev.personalization.activePaletteId === paletteId
-          ? themeFallback
-          : prev.personalization.activePaletteId;
-      const next: UserSettings = {
-        ...prev,
-        personalization: {
-          ...prev.personalization,
-          customPalettes: nextCustom,
-          activePaletteId: nextActive,
-        },
-        id: 'user_settings',
-      };
-      void db.putSettings(next);
-      return next;
-    });
+    const prev = settingsRef.current;
+    const nextCustom = (prev.personalization.customPalettes || []).filter(
+      (p) => p.id !== paletteId
+    );
+    const themeFallback =
+      getPalettesForTheme(prev.personalization.uiTheme || 'neo')[0]?.id ||
+      DEFAULT_PERSONALIZATION.activePaletteId;
+    const nextActive =
+      prev.personalization.activePaletteId === paletteId
+        ? themeFallback
+        : prev.personalization.activePaletteId;
+    const next: UserSettings = {
+      ...prev,
+      personalization: {
+        ...prev.personalization,
+        customPalettes: nextCustom,
+        activePaletteId: nextActive,
+      },
+      id: 'user_settings',
+    };
+    settingsRef.current = next;
+    setSettings(next);
+    await db.putSettings(next);
   }, []);
 
   const uploadBackgroundImage = useCallback(
     async (file: File) => {
       const newId = createId('bg');
-      const oldId = settings.personalization.backgroundImageId;
+      const oldId = settingsRef.current.personalization.backgroundImageId;
       await db.putArtwork({
         id: newId,
         blob: file,
@@ -250,48 +283,47 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await db.deleteArtworks([oldId]);
       }
     },
-    [settings.personalization.backgroundImageId, updatePersonalization]
+    [updatePersonalization]
   );
 
   const removeBackgroundImage = useCallback(async () => {
-    const oldId = settings.personalization.backgroundImageId;
+    const current = settingsRef.current.personalization;
+    const oldId = current.backgroundImageId;
     await updatePersonalization({
       backgroundImageId: undefined,
-      backgroundMode:
-        settings.personalization.backgroundMode === 'image'
-          ? 'ambient'
-          : settings.personalization.backgroundMode,
+      backgroundMode: current.backgroundMode === 'image' ? 'ambient' : current.backgroundMode,
     });
     if (oldId) {
       await db.deleteArtworks([oldId]);
     }
-  }, [settings.personalization.backgroundImageId, settings.personalization.backgroundMode, updatePersonalization]);
+  }, [updatePersonalization]);
 
   const resetPersonalization = useCallback(async () => {
-    const oldId = settings.personalization.backgroundImageId;
+    const oldId = settingsRef.current.personalization.backgroundImageId;
     await updateSettings({ personalization: DEFAULT_PERSONALIZATION });
     if (oldId) {
       await db.deleteArtworks([oldId]);
     }
-  }, [settings.personalization.backgroundImageId, updateSettings]);
+  }, [updateSettings]);
 
   const upsertMoodCategory = useCallback(
     async (category: MoodCategory) => {
-      const exists = settings.moodCategories.some((c) => c.id === category.id);
+      const current = settingsRef.current.moodCategories;
+      const exists = current.some((c) => c.id === category.id);
       const nextCategories = exists
-        ? settings.moodCategories.map((c) => (c.id === category.id ? category : c))
-        : [...settings.moodCategories, category];
+        ? current.map((c) => (c.id === category.id ? category : c))
+        : [...current, category];
       await updateSettings({ moodCategories: nextCategories });
     },
-    [settings.moodCategories, updateSettings]
+    [updateSettings]
   );
 
   const deleteMoodCategory = useCallback(
     async (id: string) => {
-      const nextCategories = settings.moodCategories.filter((c) => c.id !== id);
+      const nextCategories = settingsRef.current.moodCategories.filter((c) => c.id !== id);
       await updateSettings({ moodCategories: nextCategories });
     },
-    [settings.moodCategories, updateSettings]
+    [updateSettings]
   );
 
   const isArtistFollowed = useCallback(
@@ -307,22 +339,21 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const clean = artistName.trim();
     if (!clean || clean.toLowerCase() === 'unknown artist') return false;
     const norm = clean.toLowerCase();
-    let followedNow = false;
-    setSettings((prev) => {
-      const existing = prev.followedArtists || [];
-      const exists = existing.some((a) => a.trim().toLowerCase() === norm);
-      followedNow = !exists;
-      const nextFollowed = exists
-        ? existing.filter((a) => a.trim().toLowerCase() !== norm)
-        : [clean, ...existing];
-      const next: UserSettings = {
-        ...prev,
-        followedArtists: nextFollowed,
-        id: 'user_settings',
-      };
-      void db.putSettings(next);
-      return next;
-    });
+    const prev = settingsRef.current;
+    const existing = prev.followedArtists || [];
+    const exists = existing.some((a) => a.trim().toLowerCase() === norm);
+    const followedNow = !exists;
+    const nextFollowed = exists
+      ? existing.filter((a) => a.trim().toLowerCase() !== norm)
+      : [clean, ...existing];
+    const next: UserSettings = {
+      ...prev,
+      followedArtists: nextFollowed,
+      id: 'user_settings',
+    };
+    settingsRef.current = next;
+    setSettings(next);
+    await db.putSettings(next);
     return followedNow;
   }, []);
 

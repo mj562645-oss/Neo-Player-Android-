@@ -173,10 +173,24 @@ export const DiscoveryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!settings.osNotificationsEnabled) return;
       if (typeof window === 'undefined' || !('Notification' in window)) return;
       if (Notification.permission !== 'granted') return;
+      const iconUrl = icon || '/pwa-192x192.png';
       try {
-        new Notification(title, { body, icon });
+        new Notification(title, { body, icon: iconUrl });
       } catch {
-        // Ignore Notification errors on restricted webviews
+        // Android Chrome and iOS PWA block `new Notification(...)`; use active Service Worker instead
+        if ('serviceWorker' in navigator) {
+          void navigator.serviceWorker.ready
+            .then((reg) =>
+              reg.showNotification(title, {
+                body,
+                icon: iconUrl,
+                badge: '/pwa-192x192.png',
+              })
+            )
+            .catch(() => {
+              // Ignore Notification errors on restricted webviews
+            });
+        }
       }
     },
     [settings.osNotificationsEnabled]
