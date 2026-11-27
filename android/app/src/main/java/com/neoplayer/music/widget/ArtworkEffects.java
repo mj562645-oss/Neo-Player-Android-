@@ -77,12 +77,12 @@ public final class ArtworkEffects {
     ) {
         if (source == null || outWidth <= 0 || outHeight <= 0) return null;
         try {
-            int workW = Math.max(48, Math.min(120, outWidth / 2));
-            int workH = Math.max(24, Math.min(60, outHeight / 2));
+            int workW = Math.max(80, Math.min(220, outWidth / 2));
+            int workH = Math.max(36, Math.min(80, outHeight / 2));
             Bitmap cropped = centerCrop(source, workW, workH);
             if (cropped == null) return null;
 
-            Bitmap blurred = fastBoxBlur(cropped, Math.max(3, Math.min(18, blurRadius)));
+            Bitmap blurred = fastBoxBlur(cropped, Math.max(2, Math.min(18, blurRadius)));
             if (cropped != source && cropped != blurred) {
                 cropped.recycle();
             }

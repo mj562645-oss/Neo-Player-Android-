@@ -1,4 +1,7 @@
-import { resolveArtworkDataUrl } from '../lib/mediaSession';
+import {
+  resolveTrackArtworkBase64,
+  resolveTrackArtworkDataUrl,
+} from '../lib/mediaSession';
 import NativeAudio, { isNativeAudioAvailable } from '../plugins/nativeAudio';
 import type { RepeatMode } from '../types/music';
 
@@ -20,18 +23,6 @@ export interface PhoneNotificationResult {
   ok: boolean;
   permissionStatus: NotificationPermission | 'unsupported' | 'native-granted' | 'native-denied';
   message?: string;
-}
-
-async function resolveArtworkBase64(artworkId?: string): Promise<string | undefined> {
-  if (!artworkId) return undefined;
-  try {
-    const dataUrl = await resolveArtworkDataUrl(artworkId);
-    if (!dataUrl) return undefined;
-    const commaIdx = dataUrl.indexOf(',');
-    return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 async function getReadyServiceWorker(timeoutMs = 1500): Promise<ServiceWorkerRegistration | null> {
@@ -79,7 +70,7 @@ export async function showPhoneNotificationCenterPill(
 ): Promise<PhoneNotificationResult> {
   if (isNativeAudioAvailable()) {
     try {
-      const artworkBase64 = await resolveArtworkBase64(payload.artworkId);
+      const artworkBase64 = await resolveTrackArtworkBase64(payload.artworkId, payload.artworkUrl);
       const res = await NativeAudio.previewLivePillNotification({
         title: payload.title,
         artist: payload.artist,
@@ -87,12 +78,13 @@ export async function showPhoneNotificationCenterPill(
         isPlaying: payload.isPlaying ?? true,
         isFavourite: payload.isFavourite ?? false,
         repeatMode: payload.repeatMode ?? 'off',
+        promptPermission: Boolean(payload.requestPermissionIfNeeded),
       });
       return {
         ok: Boolean(res.ok),
         permissionStatus: res.permissionGranted ? 'native-granted' : 'native-denied',
         message: res.permissionGranted
-          ? 'Sent Live Pill to your Android notification center.'
+          ? 'Sent album-art Live Pill to your Android notification center.'
           : 'Enable notification permission in Android Settings to show the Live Pill in your notification shade.',
       };
     } catch (err) {
@@ -130,13 +122,8 @@ export async function showPhoneNotificationCenterPill(
   }
 
   const origin = window.location.origin;
-  let artworkSrc: string | null = null;
-  if (payload.artworkId) {
-    artworkSrc = await resolveArtworkDataUrl(payload.artworkId);
-  }
-  if (!artworkSrc && payload.artworkUrl) {
-    artworkSrc = payload.artworkUrl;
-  }
+  const dataArtworkUrl = await resolveTrackArtworkDataUrl(payload.artworkId, payload.artworkUrl);
+  const artworkSrc = dataArtworkUrl || payload.artworkUrl || null;
 
   const defaultIcon = `${origin}/pwa-512x512.png`;
   const icon = artworkSrc || defaultIcon;

@@ -54,6 +54,10 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:shadowColor="#B3000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="4"
                 android:text="@string/app_name"
                 android:textColor="#FFFFFFFF"
                 android:textSize="13sp"
@@ -66,8 +70,12 @@
                 android:layout_marginTop="1dp"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:shadowColor="#A6000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="3"
                 android:text="@string/widget_idle_subtitle"
-                android:textColor="#D6D9E2"
+                android:textColor="#F0F2F7"
                 android:textSize="11sp" />
         </LinearLayout>
 

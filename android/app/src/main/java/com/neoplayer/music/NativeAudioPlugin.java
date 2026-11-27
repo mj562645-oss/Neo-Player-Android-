@@ -320,9 +320,14 @@ public class NativeAudioPlugin extends Plugin {
 
     @PluginMethod
     public void previewLivePillNotification(PluginCall call) {
+        boolean promptPermission = call.getBoolean("promptPermission", true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             && getPermissionState("notifications") != PermissionState.GRANTED) {
-            requestPermissionForAlias("notifications", call, "previewLivePillPermissionCallback");
+            if (promptPermission) {
+                requestPermissionForAlias("notifications", call, "previewLivePillPermissionCallback");
+            } else {
+                dispatchPreviewLivePill(call, false);
+            }
             return;
         }
         dispatchPreviewLivePill(call, true);

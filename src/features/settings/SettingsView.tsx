@@ -610,8 +610,8 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
           />
 
           <SettingRow
-            title="In-App Bottom Album-Art Media Pill"
-            description="Render the floating bottom mini player as a compact pill with blurred album art, Like, and Repeat controls"
+            title="In-App Bottom Media Pill"
+            description="Render the floating bottom mini player as a sleek pill with Like and Repeat controls"
             control={
               <Switch
                 checked={settings.personalization.liveMediaPill ?? true}
@@ -620,7 +620,7 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
                     personalization: { ...settings.personalization, liveMediaPill: checked },
                   })
                 }
-                aria-label="In-app bottom album-art media pill"
+                aria-label="In-app bottom media pill"
               />
             }
           />

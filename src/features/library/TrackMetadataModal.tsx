@@ -237,7 +237,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
       setPendingArtworkSource(null);
     }
 
-    setLookupStatus('Applied tags. Checking Cover Art Archive...');
+    setLookupStatus('Applied tags. Fetching album cover...');
     try {
       const coverBlob = await downloadCoverBlob(candidate);
       if (
@@ -258,7 +258,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
           'Tags and cover selected. Save Changes to embed them and update your library.'
         );
       } else {
-        setLookupStatus('Tags filled (no cover found in Cover Art Archive). Save Changes to keep.');
+        setLookupStatus('Tags filled (no cover found online). Save Changes to keep.');
       }
     } catch (error) {
       if (
@@ -285,7 +285,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
     const requestId = ++lookupRequestIdRef.current;
     const lookupTrackId = track.id;
     setLookingUp(true);
-    setLookupStatus('Searching MusicBrainz & Cover Art Archive...');
+    setLookupStatus('Searching music databases & cover art...');
     try {
       const hints = extractSearchHints({
         title: title || track.title,
@@ -311,7 +311,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
       }
       setCandidates(list);
       if (list.length === 0) {
-        setLookupStatus('No matching releases found on MusicBrainz.');
+        setLookupStatus('No matching releases found online.');
         return;
       }
 
@@ -323,7 +323,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         trackRef.current?.id === lookupTrackId
       ) {
         setLookupStatus(
-          err instanceof Error ? err.message : 'Unable to reach MusicBrainz right now.'
+          err instanceof Error ? err.message : 'Unable to reach metadata databases right now.'
         );
       }
     } finally {
@@ -493,7 +493,7 @@ export const TrackMetadataModal: React.FC<TrackMetadataModalProps> = ({
         {candidates.length > 1 && (
           <div className="space-y-1.5">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#6E6E73] dark:text-[#98989D]">
-              MusicBrainz Release Matches
+              Matched Releases
             </p>
             <div className="max-h-36 overflow-y-auto scrollbar-thin rounded-2xl liquid-glass-subtle divide-y divide-black/6 dark:divide-white/8">
               {candidates.slice(0, 5).map((cand) => {

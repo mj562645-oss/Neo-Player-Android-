@@ -1,8 +1,20 @@
 import { Capacitor } from '@capacitor/core';
+import {
+  cleanArtistName,
+  cleanMediaTagNoise,
+  extractFeaturedArtists,
+  hasFilenameNoise,
+  isPlaceholderAlbum,
+  isPlaceholderArtist,
+  parseAudioFilename,
+  stripAudioExtension,
+  stripLeadingTrackNumber,
+} from '../lib/filenameParser';
 import type { Track } from '../types/music';
 
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const MUSICBRAINZ_BASE = 'https://musicbrainz.org/ws/2';
+const ITUNES_SEARCH_BASE = 'https://itunes.apple.com/search';
 const COVER_ART_BASE = 'https://coverartarchive.org';
 
 let lastMusicBrainzCallAt = 0;
@@ -30,9 +42,12 @@ export interface MetadataCandidate {
   genre?: string;
   year?: number;
   trackNumber?: number;
+  durationSec?: number;
   releaseId?: string;
   releaseGroupId?: string;
   coverUrl?: string;
+  fallbackCoverUrl?: string;
+  source?: 'musicbrainz' | 'itunes';
   score: number;
 }
 
@@ -58,6 +73,7 @@ export interface TrackEnrichmentResult {
 function normalizeForMatch(value: string): string {
   return value
     .toLowerCase()
+    .replace(/['’`]/g, '')
     .replace(/[\(\[][^\)\]]*[\)\]]/g, ' ')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
@@ -69,9 +85,14 @@ function tokenOverlapScore(a: string, b: string): number {
   const nb = normalizeForMatch(b);
   if (!na || !nb) return 0;
   if (na === nb) return 1;
-  if (na.includes(nb) || nb.includes(na)) return 0.85;
-  const setA = new Set(na.split(' '));
-  const setB = new Set(nb.split(' '));
+  // Also match spaced/merged stylings if both have multiple chars (e.g. "blvcksvm" vs "blvck svm")
+  const compactA = na.replace(/\s+/g, '');
+  const compactB = nb.replace(/\s+/g, '');
+  if (compactA.length >= 4 && compactA === compactB) return 0.96;
+  if (na.includes(nb) || nb.includes(na)) return 0.86;
+  const setA = new Set(na.split(' ').filter(Boolean));
+  const setB = new Set(nb.split(' ').filter(Boolean));
+  if (setA.size === 0 || setB.size === 0) return 0;
   let hits = 0;
   for (const tok of setA) {
     if (setB.has(tok)) hits++;
@@ -80,53 +101,75 @@ function tokenOverlapScore(a: string, b: string): number {
 }
 
 /**
- * Derives clean title & artist hints even when a file lacks ID3 tags
- * (e.g. "03 - Daft Punk - Instant Crush (Official Audio).mp3").
+ * Derives clean title & artist hints even when an audio file lacks ID3 tags
+ * or has downloader-corrupted filenames like:
+ * - "Blvck_Svm_-_hyogo_[official_lyric_video.mp3" -> artist: "Blvck Svm", title: "hyogo"
+ * - "Lil_Keed_-_It_s_Up_Freestyle_[Official_Video.m4a" -> artist: "Lil Keed", title: "It's Up Freestyle"
  */
-export function extractSearchHints(track: Pick<Track, 'title' | 'artist' | 'album' | 'fileName' | 'duration'>): {
+export function extractSearchHints(
+  track: Pick<Track, 'title' | 'artist' | 'album' | 'fileName' | 'duration'>
+): {
   title: string;
+  searchTitle: string;
   artist: string;
   album: string;
   combinedQuery: string;
 } {
-  const baseName = track.fileName
-    .replace(/\.[^/.]+$/, '')
-    .replace(/^\d{1,3}[\s._-]+/, '')
-    .replace(/\((official|audio|video|lyrics?|hd|hq|remaster(ed)?|visualizer)[^)]*\)/gi, '')
-    .replace(/\[(official|audio|video|lyrics?|hd|hq|kbps|320|flac)[^\]]*\]/gi, '')
-    .replace(/_/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const parsedFile = parseAudioFilename(track.fileName || '');
+  const rawTitle = (track.title || '').trim();
+  const rawArtist = (track.artist || '').trim();
+  const rawTitleNoExt = stripAudioExtension(track.fileName || '').trim();
 
-  const rawTitle = track.title.trim();
-  const rawArtist = track.artist.trim();
-  const hasRealArtist = Boolean(rawArtist && rawArtist.toLowerCase() !== 'unknown artist');
-  const hasRealAlbum = Boolean(track.album && track.album.trim().toLowerCase() !== 'single');
+  const artistIsPlaceholder = isPlaceholderArtist(rawArtist);
+  let artist = artistIsPlaceholder ? '' : cleanArtistName(rawArtist);
+
+  const rawTitleLooksLikeFile =
+    !rawTitle ||
+    rawTitle === rawTitleNoExt ||
+    rawTitle === track.fileName ||
+    hasFilenameNoise(rawTitle) ||
+    (!artist && /\s+[-–—]\s+/.test(cleanMediaTagNoise(rawTitle)));
 
   let title = rawTitle;
-  let artist = hasRealArtist ? rawArtist : '';
 
-  if ((!artist || title === track.fileName.replace(/\.[^/.]+$/, '')) && baseName.includes(' - ')) {
-    const parts = baseName.split(' - ').map((p) => p.trim()).filter(Boolean);
-    if (parts.length >= 2) {
-      if (!artist) artist = parts[0];
-      title = parts.slice(1).join(' - ');
+  if (rawTitleLooksLikeFile) {
+    if (parsedFile.hasExplicitArtist && (artistIsPlaceholder || hasFilenameNoise(rawTitle))) {
+      title = parsedFile.title;
+      if (!artist) artist = parsedFile.artist;
+    } else if (rawTitle) {
+      const reparsed = parseAudioFilename(rawTitle);
+      title = reparsed.title;
+      if (!artist && reparsed.hasExplicitArtist) {
+        artist = reparsed.artist;
+      }
+    }
+  } else {
+    title = cleanMediaTagNoise(rawTitle) || rawTitle;
+    if (artist) {
+      // Strip redundant "Artist - Title" prefix if present inside the title tag
+      const cleanedArtistPrefix = artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const prefixRe = new RegExp(`^${cleanedArtistPrefix}\\s*[-–—]+\\s*`, 'i');
+      if (prefixRe.test(title)) {
+        title = title.replace(prefixRe, '').trim();
+      }
     }
   }
 
-  title = title
-    .replace(/\((official|audio|video|lyrics?|hd|hq|visualizer)[^)]*\)/gi, '')
-    .replace(/\[(official|audio|video|lyrics?|hd|hq|kbps|320|flac)[^\]]*\]/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  if (!artist && parsedFile.hasExplicitArtist) {
+    artist = parsedFile.artist;
+  }
 
-  if (!title) title = baseName || track.fileName;
+  title = stripLeadingTrackNumber(cleanMediaTagNoise(title)) || parsedFile.title || track.fileName;
+  const searchTitleSplit = extractFeaturedArtists(title);
+  const searchTitle = searchTitleSplit.mainText || title;
+  const album = isPlaceholderAlbum(track.album) ? '' : track.album.trim();
 
-  const combinedQuery = artist ? `${artist} ${title}` : title;
+  const combinedQuery = artist ? `${artist} ${searchTitle}` : searchTitle;
   return {
     title,
+    searchTitle,
     artist,
-    album: hasRealAlbum ? track.album.trim() : '',
+    album,
     combinedQuery,
   };
 }
@@ -199,12 +242,13 @@ export async function fetchLyricsCandidates(
   const hints = extractSearchHints(track);
   const collected = new Map<number, LyricsCandidate>();
   const isNative = Capacitor.isNativePlatform();
+  const lookupTitle = hints.searchTitle || hints.title;
 
   // 1. Try exact match endpoint when we have artist + title + no custom query
-  if (!customQuery && hints.artist && hints.title) {
+  if (!customQuery && hints.artist && lookupTitle) {
     try {
       const params = new URLSearchParams({
-        track_name: hints.title,
+        track_name: lookupTitle,
         artist_name: hints.artist,
       });
       if (hints.album) params.set('album_name', hints.album);
@@ -224,7 +268,7 @@ export async function fetchLyricsCandidates(
       if (res.ok) {
         const item = (await res.json()) as LrcLibRawItem;
         if (item && item.id && (item.syncedLyrics || item.plainLyrics)) {
-          collected.set(item.id, mapLrcLibItem(item, hints.title, hints.artist, track.duration));
+          collected.set(item.id, mapLrcLibItem(item, lookupTitle, hints.artist, track.duration));
         }
       }
     } catch {
@@ -256,7 +300,7 @@ export async function fetchLyricsCandidates(
             if (!collected.has(item.id)) {
               collected.set(
                 item.id,
-                mapLrcLibItem(item, hints.title, hints.artist, track.duration)
+                mapLrcLibItem(item, lookupTitle, hints.artist, track.duration)
               );
             }
           }
@@ -309,6 +353,22 @@ interface MbRecording {
   tags?: Array<{ name?: string; count?: number }>;
 }
 
+interface ItunesSongRaw {
+  trackId?: number;
+  collectionId?: number;
+  trackName?: string;
+  collectionName?: string;
+  artistName?: string;
+  collectionArtistName?: string;
+  artworkUrl600?: string;
+  artworkUrl100?: string;
+  artworkUrl60?: string;
+  releaseDate?: string;
+  primaryGenreName?: string;
+  trackNumber?: number;
+  trackTimeMillis?: number;
+}
+
 function formatArtistCredit(credits?: MbArtistCredit[]): string {
   if (!credits || credits.length === 0) return '';
   return credits
@@ -354,58 +414,129 @@ function formatGenreTag(tags?: Array<{ name?: string; count?: number }>): string
     .join(' ');
 }
 
-export async function fetchMetadataCandidates(
-  track: Pick<Track, 'title' | 'artist' | 'album' | 'fileName' | 'duration'>,
-  customQuery?: string
-): Promise<MetadataCandidate[]> {
-  const hints = extractSearchHints(track);
-  let luceneQuery = '';
+function scoreCandidateRelevance(params: {
+  candTitle: string;
+  candArtist: string;
+  candAlbum: string;
+  candDurationSec?: number;
+  hintTitle: string;
+  hintSearchTitle: string;
+  hintArtist: string;
+  hintAlbum: string;
+  trackDuration: number;
+  hasCover: boolean;
+  baseQualityBonus?: number;
+}): number {
+  const titleScore = Math.max(
+    tokenOverlapScore(params.candTitle, params.hintTitle),
+    tokenOverlapScore(params.candTitle, params.hintSearchTitle)
+  );
+  if (titleScore < 0.35) return 0;
 
-  if (customQuery?.trim()) {
-    luceneQuery = customQuery.trim();
-  } else if (hints.artist && hints.title) {
-    const safeTitle = hints.title.replace(/"/g, '');
-    const safeArtist = hints.artist.replace(/"/g, '');
-    luceneQuery = `recording:"${safeTitle}" AND artist:"${safeArtist}"`;
-  } else {
-    luceneQuery = hints.title.replace(/"/g, '');
+  let artistScore = 0.65;
+  if (params.hintArtist) {
+    artistScore = tokenOverlapScore(params.candArtist, params.hintArtist);
+    // Also check "feat." co-credit inside candTitle (e.g. "Song (feat. Artist)")
+    if (artistScore < 0.4 && tokenOverlapScore(params.candTitle, params.hintArtist) >= 0.7) {
+      artistScore = 0.75;
+    }
+    if (artistScore < 0.3) return 0;
   }
 
-  if (!luceneQuery) return [];
+  let score = titleScore * 0.54 + artistScore * 0.42 + (params.baseQualityBonus || 0);
 
-  await waitForMusicBrainzSlot();
+  if (params.hintAlbum && params.candAlbum) {
+    score += tokenOverlapScore(params.candAlbum, params.hintAlbum) * 0.08;
+  }
 
-  const params = new URLSearchParams({
-    query: luceneQuery,
-    fmt: 'json',
-    limit: '6',
-  });
+  if (params.trackDuration > 0 && params.candDurationSec && params.candDurationSec > 0) {
+    const diffSec = Math.abs(params.trackDuration - params.candDurationSec);
+    if (diffSec <= 4) score += 0.14;
+    else if (diffSec <= 10) score += 0.05;
+    else if (diffSec > 25) score -= 0.22;
+  }
 
-  const isNative = Capacitor.isNativePlatform();
-  let res: Response | null = null;
-  if (!isNative) {
-    try {
-      res = await fetch(`/api/enrichment/musicbrainz?q=${encodeURIComponent(luceneQuery)}`);
-    } catch {
-      res = null;
+  // Penalize tribute/karaoke/cover/instrumental/slowed versions unless requested in hints
+  const hintLower = `${params.hintTitle} ${params.hintArtist}`.toLowerCase();
+  const candLower = `${params.candTitle} ${params.candArtist} ${params.candAlbum}`.toLowerCase();
+  for (const tag of ['karaoke', 'tribute', 'instrumental', 'cover version', 'lullaby', '8-bit', 'sped up', 'slowed']) {
+    if (candLower.includes(tag) && !hintLower.includes(tag)) {
+      score -= 0.35;
     }
   }
-  if (!res || !res.ok) {
-    res = await fetch(`${MUSICBRAINZ_BASE}/recording?${params.toString()}`, {
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+
+  if (params.hasCover) score += 0.04;
+  return Math.max(0, score);
+}
+
+async function queryMusicBrainzRecordings(luceneQuery: string): Promise<MbRecording[]> {
+  if (!luceneQuery.trim()) return [];
+  const isNative = Capacitor.isNativePlatform();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await waitForMusicBrainzSlot();
+    let res: Response | null = null;
+    if (!isNative) {
+      try {
+        res = await fetch(`/api/enrichment/musicbrainz?q=${encodeURIComponent(luceneQuery)}`);
+      } catch {
+        res = null;
+      }
+    }
+    if (!res || (!res.ok && res.status !== 503)) {
+      const params = new URLSearchParams({
+        query: luceneQuery,
+        fmt: 'json',
+        limit: '6',
+      });
+      res = await fetch(`${MUSICBRAINZ_BASE}/recording?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+      });
+    }
+    if (res.status === 503 && attempt === 0) {
+      lastMusicBrainzCallAt = Date.now() + 250;
+      continue;
+    }
+    if (!res.ok) return [];
+    const data = (await res.json()) as { recordings?: MbRecording[] };
+    return data.recordings || [];
+  }
+  return [];
+}
+
+async function fetchMusicBrainzCandidates(
+  hints: ReturnType<typeof extractSearchHints>,
+  trackDuration: number,
+  customQuery?: string
+): Promise<MetadataCandidate[]> {
+  let recordings: MbRecording[] = [];
+
+  if (customQuery?.trim()) {
+    recordings = await queryMusicBrainzRecordings(customQuery.trim());
+  } else {
+    const cleanTitle = (hints.searchTitle || hints.title).replace(/["()[\]]/g, '').trim();
+    const cleanArtist = hints.artist.replace(/["()[\]]/g, '').trim();
+
+    if (cleanArtist && cleanTitle) {
+      recordings = await queryMusicBrainzRecordings(
+        `recording:"${cleanTitle}" AND artist:"${cleanArtist}"`
+      );
+      if (recordings.length === 0) {
+        const titleWords = normalizeForMatch(cleanTitle).split(' ').filter(Boolean).join(' AND ');
+        const artistWords = normalizeForMatch(cleanArtist).split(' ').filter(Boolean).join(' AND ');
+        if (titleWords && artistWords) {
+          recordings = await queryMusicBrainzRecordings(
+            `recording:(${titleWords}) AND artist:(${artistWords})`
+          );
+        }
+      }
+    } else if (cleanTitle) {
+      recordings = await queryMusicBrainzRecordings(cleanTitle);
+    }
   }
 
-  if (!res.ok) {
-    throw new Error(`MusicBrainz lookup failed (HTTP ${res.status})`);
-  }
-
-  const data = (await res.json()) as { recordings?: MbRecording[] };
-  const recordings = data.recordings || [];
-
-  const candidates: MetadataCandidate[] = recordings.map((rec) => {
+  const out: MetadataCandidate[] = [];
+  for (const rec of recordings) {
     const recTitle = rec.title || hints.title;
     const recArtist = formatArtistCredit(rec['artist-credit']) || hints.artist || 'Unknown Artist';
     const bestRelease = pickBestRelease(rec.releases, hints.album);
@@ -417,15 +548,26 @@ export async function fetchMetadataCandidates(
     const trackNumber = rawTrackNum ? parseInt(rawTrackNum, 10) : undefined;
     const releaseId = bestRelease?.id;
     const releaseGroupId = bestRelease?.['release-group']?.id;
+    const durationSec = rec.length && rec.length > 0 ? Math.round(rec.length / 1000) : undefined;
+    const coverUrl = releaseId ? `${COVER_ART_BASE}/release/${releaseId}/front-500` : undefined;
 
-    let score = (rec.score || 50) / 100;
-    if (track.duration > 0 && rec.length && rec.length > 0) {
-      const diffSec = Math.abs(track.duration - rec.length / 1000);
-      if (diffSec < 4) score += 0.25;
-      else if (diffSec > 15) score -= 0.2;
-    }
+    const relevance = scoreCandidateRelevance({
+      candTitle: recTitle,
+      candArtist: recArtist,
+      candAlbum: albumTitle,
+      candDurationSec: durationSec,
+      hintTitle: hints.title,
+      hintSearchTitle: hints.searchTitle,
+      hintArtist: hints.artist,
+      hintAlbum: hints.album,
+      trackDuration,
+      hasCover: Boolean(coverUrl),
+      baseQualityBonus: bestRelease?.status === 'Official' ? 0.04 : 0,
+    });
 
-    return {
+    if (relevance <= 0 && !customQuery?.trim()) continue;
+
+    out.push({
       recordingId: rec.id,
       title: recTitle,
       artist: recArtist,
@@ -434,20 +576,159 @@ export async function fetchMetadataCandidates(
       genre: formatGenreTag(rec.tags),
       year: year && year >= 1900 && year <= 2100 ? year : undefined,
       trackNumber: trackNumber && trackNumber > 0 ? trackNumber : undefined,
+      durationSec,
       releaseId,
       releaseGroupId,
-      coverUrl: releaseId ? `${COVER_ART_BASE}/release/${releaseId}/front-500` : undefined,
-      score,
-    };
-  });
+      coverUrl,
+      source: 'musicbrainz',
+      score: relevance > 0 ? relevance : (rec.score || 40) / 100,
+    });
+  }
 
-  return candidates.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+function upgradeItunesArtworkUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  return url
+    .replace(/100x100bb/g, '600x600bb')
+    .replace(/60x60bb/g, '600x600bb')
+    .replace(/^http:\/\//i, 'https://');
+}
+
+async function fetchItunesCandidates(
+  hints: ReturnType<typeof extractSearchHints>,
+  trackDuration: number,
+  customQuery?: string
+): Promise<MetadataCandidate[]> {
+  const query = (customQuery?.trim() || hints.combinedQuery).trim();
+  if (!query) return [];
+
+  const isNative = Capacitor.isNativePlatform();
+  let res: Response | null = null;
+  if (!isNative) {
+    try {
+      res = await fetch(`/api/enrichment/itunes?q=${encodeURIComponent(query)}`);
+    } catch {
+      res = null;
+    }
+  }
+  if (!res || !res.ok) {
+    const params = new URLSearchParams({
+      term: query,
+      country: 'us',
+      media: 'music',
+      entity: 'song',
+      limit: '8',
+    });
+    res = await fetch(`${ITUNES_SEARCH_BASE}?${params.toString()}`);
+  }
+  if (!res.ok) return [];
+
+  const data = (await res.json()) as { results?: ItunesSongRaw[] };
+  const rows = data.results || [];
+  const out: MetadataCandidate[] = [];
+
+  for (const item of rows) {
+    if (!item.trackName || !item.artistName) continue;
+    const coverUrl = upgradeItunesArtworkUrl(
+      item.artworkUrl600 || item.artworkUrl100 || item.artworkUrl60
+    );
+    const yearMatch = (item.releaseDate || '').match(/^(\d{4})/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : undefined;
+    const durationSec =
+      item.trackTimeMillis && item.trackTimeMillis > 0
+        ? Math.round(item.trackTimeMillis / 1000)
+        : undefined;
+    const albumTitle = item.collectionName?.replace(/\s*-\s*Single$/i, '').trim() || 'Single';
+
+    const relevance = scoreCandidateRelevance({
+      candTitle: item.trackName,
+      candArtist: item.artistName,
+      candAlbum: albumTitle,
+      candDurationSec: durationSec,
+      hintTitle: hints.title,
+      hintSearchTitle: hints.searchTitle,
+      hintArtist: hints.artist,
+      hintAlbum: hints.album,
+      trackDuration,
+      hasCover: Boolean(coverUrl),
+      baseQualityBonus: 0.05,
+    });
+
+    if (relevance <= 0 && !customQuery?.trim()) continue;
+
+    out.push({
+      recordingId: `itunes-${item.trackId || `${item.artistName}-${item.trackName}`}`,
+      title: item.trackName,
+      artist: item.artistName,
+      album: albumTitle,
+      albumArtist: item.collectionArtistName || item.artistName,
+      genre: item.primaryGenreName,
+      year: year && year >= 1900 && year <= 2100 ? year : undefined,
+      trackNumber:
+        item.trackNumber && item.trackNumber > 0 ? item.trackNumber : undefined,
+      durationSec,
+      coverUrl,
+      source: 'itunes',
+      score: relevance > 0 ? relevance : 0.45,
+    });
+  }
+
+  return out;
+}
+
+export async function fetchMetadataCandidates(
+  track: Pick<Track, 'title' | 'artist' | 'album' | 'fileName' | 'duration'>,
+  customQuery?: string
+): Promise<MetadataCandidate[]> {
+  const hints = extractSearchHints(track);
+  if (!customQuery?.trim() && !hints.title && !hints.artist) return [];
+
+  const [mbRes, itunesRes] = await Promise.allSettled([
+    fetchMusicBrainzCandidates(hints, track.duration, customQuery),
+    fetchItunesCandidates(hints, track.duration, customQuery),
+  ]);
+
+  const mbList = mbRes.status === 'fulfilled' ? mbRes.value : [];
+  const itunesList = itunesRes.status === 'fulfilled' ? itunesRes.value : [];
+
+  // Attach verified iTunes cover art as fallback onto matching MusicBrainz releases
+  for (const mb of mbList) {
+    const matchingItunes = itunesList.find(
+      (it) =>
+        tokenOverlapScore(it.title, mb.title) >= 0.7 &&
+        tokenOverlapScore(it.artist, mb.artist) >= 0.7
+    );
+    if (matchingItunes) {
+      if (matchingItunes.coverUrl && !mb.fallbackCoverUrl) {
+        mb.fallbackCoverUrl = matchingItunes.coverUrl;
+      }
+      if (!mb.genre && matchingItunes.genre) {
+        mb.genre = matchingItunes.genre;
+      }
+    }
+  }
+
+  const combined = [...itunesList, ...mbList].sort((a, b) => b.score - a.score);
+  const deduped: MetadataCandidate[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const cand of combined) {
+    const key = `${normalizeForMatch(cand.title)}::${normalizeForMatch(cand.artist)}::${normalizeForMatch(cand.album)}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    deduped.push(cand);
+  }
+
+  return deduped;
 }
 
 export async function downloadCoverBlob(candidate: {
   releaseId?: string;
   releaseGroupId?: string;
   coverUrl?: string;
+  fallbackCoverUrl?: string;
 }): Promise<Blob | null> {
   const urls: string[] = [];
   if (candidate.coverUrl) urls.push(candidate.coverUrl);
@@ -456,7 +737,11 @@ export async function downloadCoverBlob(candidate: {
     if (!urls.includes(releaseUrl)) urls.push(releaseUrl);
   }
   if (candidate.releaseGroupId) {
-    urls.push(`${COVER_ART_BASE}/release-group/${candidate.releaseGroupId}/front-500`);
+    const rgUrl = `${COVER_ART_BASE}/release-group/${candidate.releaseGroupId}/front-500`;
+    if (!urls.includes(rgUrl)) urls.push(rgUrl);
+  }
+  if (candidate.fallbackCoverUrl && !urls.includes(candidate.fallbackCoverUrl)) {
+    urls.push(candidate.fallbackCoverUrl);
   }
 
   const isNative = Capacitor.isNativePlatform();
@@ -472,7 +757,7 @@ export async function downloadCoverBlob(candidate: {
         return blob;
       }
     } catch {
-      // Try fallback release-group URL if available
+      // Try next fallback cover URL if available
     }
   }
   return null;
@@ -490,16 +775,34 @@ export async function enrichTrackOnline(
   let coverMatched = false;
   let lyricsMatched = false;
 
-  const hasUnknownArtist = !track.artist || track.artist.trim().toLowerCase() === 'unknown artist';
-  const hasGenericAlbum = !track.album || track.album.trim().toLowerCase() === 'single';
+  const parsedFile = parseAudioFilename(track.fileName || '');
+  const rawBaseFileName = stripAudioExtension(track.fileName || '');
+  const hasUnknownArtist = isPlaceholderArtist(track.artist);
+  const hasGenericAlbum = isPlaceholderAlbum(track.album);
   const hasUnknownGenre = !track.genre || track.genre.trim().toLowerCase() === 'unclassified';
+
+  const titleLooksFilenameDerived =
+    !track.title ||
+    track.title.trim() === rawBaseFileName ||
+    hasFilenameNoise(track.title) ||
+    normalizeForMatch(track.title) === normalizeForMatch(parsedFile.title) ||
+    normalizeForMatch(track.title) === normalizeForMatch(parsedFile.cleanedBaseName);
+
+  const artistLooksFilenameDerived =
+    hasUnknownArtist ||
+    hasFilenameNoise(track.artist) ||
+    (parsedFile.hasExplicitArtist &&
+      normalizeForMatch(track.artist) === normalizeForMatch(parsedFile.artist));
 
   let enrichedMeta: MetadataCandidate | undefined;
 
   if (options.fetchMetadata || (options.fetchCover && !track.artworkId)) {
     try {
       const metaList = await fetchMetadataCandidates(track);
-      enrichedMeta = metaList[0];
+      const top = metaList[0];
+      if (top && top.score >= 0.48) {
+        enrichedMeta = top;
+      }
     } catch {
       // Continue cleanly to lyrics lookup if metadata request fails
     }
@@ -510,15 +813,27 @@ export async function enrichTrackOnline(
     const overwrite = options.mode === 'overwrite';
 
     if (options.fetchMetadata) {
-      if (overwrite || !track.title || track.title === track.fileName.replace(/\.[^/.]+$/, '')) {
-        trackPatch.title = enrichedMeta.title;
+      if (
+        overwrite ||
+        titleLooksFilenameDerived ||
+        !track.title
+      ) {
+        if (enrichedMeta.title && enrichedMeta.title !== track.title) {
+          trackPatch.title = enrichedMeta.title;
+        }
       }
-      if (overwrite || hasUnknownArtist) {
-        trackPatch.artist = enrichedMeta.artist;
+      if (overwrite || artistLooksFilenameDerived) {
+        if (enrichedMeta.artist && enrichedMeta.artist !== track.artist) {
+          trackPatch.artist = enrichedMeta.artist;
+        }
       }
       if (overwrite || hasGenericAlbum) {
-        trackPatch.album = enrichedMeta.album;
-        trackPatch.albumArtist = enrichedMeta.albumArtist;
+        if (enrichedMeta.album && enrichedMeta.album !== track.album) {
+          trackPatch.album = enrichedMeta.album;
+        }
+        if (enrichedMeta.albumArtist && enrichedMeta.albumArtist !== track.albumArtist) {
+          trackPatch.albumArtist = enrichedMeta.albumArtist;
+        }
       }
       if ((overwrite || hasUnknownGenre) && enrichedMeta.genre) {
         trackPatch.genre = enrichedMeta.genre;
@@ -534,6 +849,21 @@ export async function enrichTrackOnline(
     if (options.fetchCover && (overwrite || !track.artworkId)) {
       coverBlob = await downloadCoverBlob(enrichedMeta);
       coverMatched = Boolean(coverBlob);
+    }
+  } else if (options.mode === 'missing-only' && (titleLooksFilenameDerived || artistLooksFilenameDerived)) {
+    // Even if online services returned nothing or were unreachable, clean dirty filename tags offline!
+    if (hasFilenameNoise(track.title) && parsedFile.title && parsedFile.title !== track.title) {
+      trackPatch.title = parsedFile.title;
+    }
+    if (
+      (hasUnknownArtist || hasFilenameNoise(track.artist)) &&
+      parsedFile.hasExplicitArtist &&
+      parsedFile.artist !== track.artist
+    ) {
+      trackPatch.artist = parsedFile.artist;
+      if (isPlaceholderArtist(track.albumArtist)) {
+        trackPatch.albumArtist = parsedFile.artist;
+      }
     }
   }
 

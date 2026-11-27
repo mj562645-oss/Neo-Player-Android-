@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { usePlayer } from '../app/PlayerContext';
 import { useTheme } from '../app/ThemeContext';
-import { useArtworkUrl, useDominantColor } from '../hooks/useDominantColor';
+import { useDominantColor } from '../hooks/useDominantColor';
 import { cn } from '../lib/utils';
 import { AlbumArtwork } from './AlbumArtwork';
 
@@ -28,10 +28,7 @@ export const MiniPlayer: React.FC = () => {
     setNowPlayingOpen,
     setQueueOpen,
   } = usePlayer();
-  const { settings, resolvedTheme } = useTheme();
-
-  const resolvedArtworkUrl = useArtworkUrl(currentTrack?.artworkId);
-  const artworkSrc = resolvedArtworkUrl || currentTrack?.artworkUrl || null;
+  const { settings } = useTheme();
   const { palette } = useDominantColor(currentTrack?.artworkId, currentTrack?.artworkUrl);
 
   if (!currentTrack) return null;
@@ -39,7 +36,6 @@ export const MiniPlayer: React.FC = () => {
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
   const isLivePill = settings.personalization.liveMediaPill ?? true;
   const uiTheme = settings.personalization.uiTheme || 'neo';
-  const showAlbumBackdrop = isLivePill && Boolean(artworkSrc);
 
   const repeatLabel =
     repeat === 'one'
@@ -56,53 +52,17 @@ export const MiniPlayer: React.FC = () => {
     >
       <div
         className={cn(
-          'pointer-events-auto relative overflow-hidden max-w-4xl mx-auto transition-all duration-300',
+          'pointer-events-auto relative overflow-hidden max-w-4xl mx-auto liquid-glass-elevated transition-all duration-300',
           isLivePill
             ? uiTheme === 'windows'
-              ? 'rounded-[14px] border border-black/12 dark:border-white/18 shadow-xl'
-              : 'rounded-full border border-black/10 dark:border-white/18 shadow-[0_14px_38px_-10px_rgba(0,0,0,0.42)]'
-            : 'liquid-glass-elevated neo-card-radius'
+              ? 'rounded-[14px]'
+              : 'rounded-full'
+            : 'neo-card-radius'
         )}
-        style={
-          !isLivePill
-            ? {
-                backgroundImage: `linear-gradient(120deg, ${palette.primary}, transparent 65%)`,
-              }
-            : {
-                backgroundColor:
-                  resolvedTheme === 'dark' ? 'rgba(18, 20, 28, 0.88)' : 'rgba(248, 249, 252, 0.90)',
-              }
-        }
+        style={{
+          backgroundImage: `linear-gradient(120deg, ${palette.primary}, transparent 65%)`,
+        }}
       >
-        {/* Blurred Album Art Live Pill Background */}
-        {isLivePill && (
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-            {showAlbumBackdrop && artworkSrc ? (
-              <img
-                src={artworkSrc}
-                alt=""
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover scale-125 blur-2xl saturate-150 transition-opacity duration-500"
-              />
-            ) : (
-              <div
-                className="w-full h-full"
-                style={{
-                  backgroundImage: `linear-gradient(120deg, ${palette.primary}, ${palette.secondary})`,
-                }}
-              />
-            )}
-            <div
-              className={cn(
-                'absolute inset-0 transition-colors duration-300',
-                resolvedTheme === 'dark'
-                  ? 'bg-gradient-to-r from-[#0B0C12]/80 via-[#10121B]/68 to-[#0B0C12]/82'
-                  : 'bg-gradient-to-r from-white/82 via-white/70 to-white/82'
-              )}
-            />
-          </div>
-        )}
-
         <div
           className={cn(
             'relative z-10 flex items-center gap-2 sm:gap-3 min-h-[56px]',

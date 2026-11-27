@@ -1,3 +1,11 @@
+import {
+  cleanArtistName,
+  cleanMediaTagNoise,
+  hasFilenameNoise,
+  isPlaceholderAlbum,
+  isPlaceholderArtist,
+  parseAudioFilename,
+} from './filenameParser';
 import { getAudioFormatLabel, sanitizeText } from './format';
 
 export interface ExtractedAudioMetadata {
@@ -345,18 +353,10 @@ function parseMp4Atoms(
 }
 
 function parseFilenameFallback(fileName: string): { title: string; artist: string } {
-  const base = fileName.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').trim();
-  const cleanTrackNum = base.replace(/^\d{1,3}[\s.\-_]+/, '').trim() || base;
-  const parts = cleanTrackNum.split(/\s+-\s+/);
-  if (parts.length >= 2) {
-    return {
-      artist: sanitizeText(parts[0], 'Unknown Artist'),
-      title: sanitizeText(parts.slice(1).join(' - '), cleanTrackNum),
-    };
-  }
+  const parsed = parseAudioFilename(fileName);
   return {
-    artist: 'Unknown Artist',
-    title: sanitizeText(cleanTrackNum, 'Untitled Track'),
+    artist: sanitizeText(parsed.artist, 'Unknown Artist'),
+    title: sanitizeText(parsed.title, 'Untitled Track'),
   };
 }
 
@@ -445,13 +445,49 @@ export async function extractAudioMetadata(file: File): Promise<ExtractedAudioMe
   }
 
   const duration = await probeAudioDuration(file);
-  const artist = parsed.artist || fallback.artist;
+  const rawParsedTitle = parsed.title?.trim();
+  const rawParsedArtist = parsed.artist?.trim();
+  const rawArtistMissing = isPlaceholderArtist(rawParsedArtist);
+  const embeddedTitleNoisy = hasFilenameNoise(rawParsedTitle);
+
+  let title = rawParsedTitle && !embeddedTitleNoisy ? rawParsedTitle : '';
+  let artist = rawArtistMissing ? '' : cleanArtistName(rawParsedArtist || '');
+
+  if (embeddedTitleNoisy && rawParsedTitle) {
+    const reparsed = parseAudioFilename(rawParsedTitle);
+    title = reparsed.title;
+    if (!artist && reparsed.hasExplicitArtist) {
+      artist = reparsed.artist;
+    }
+  } else if (!artist && rawParsedTitle && /\s+[-–—]\s+/.test(rawParsedTitle)) {
+    const reparsed = parseAudioFilename(rawParsedTitle);
+    if (reparsed.hasExplicitArtist) {
+      title = reparsed.title;
+      artist = reparsed.artist;
+    }
+  }
+
+  if (!title) {
+    title = fallback.title;
+  } else {
+    title = sanitizeText(cleanMediaTagNoise(title) || title, fallback.title);
+  }
+  if (!artist) {
+    artist = fallback.artist;
+  } else {
+    artist = sanitizeText(artist, fallback.artist);
+  }
+
+  const album = isPlaceholderAlbum(parsed.album) ? 'Single' : sanitizeText(parsed.album, 'Single');
+  const albumArtist = isPlaceholderArtist(parsed.albumArtist)
+    ? artist
+    : sanitizeText(parsed.albumArtist, artist);
 
   return {
-    title: parsed.title || fallback.title,
+    title,
     artist,
-    album: parsed.album || 'Single',
-    albumArtist: parsed.albumArtist || artist,
+    album,
+    albumArtist,
     genre: parsed.genre || 'Unclassified',
     year: parsed.year,
     trackNumber: parsed.trackNumber,

@@ -593,8 +593,40 @@ async function createApp() {
       );
       res.json(data);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'MusicBrainz lookup failed';
+      res.status(msg.includes('503') ? 503 : 502).json({
+        error: msg,
+      });
+    }
+  });
+
+  app.get('/api/enrichment/itunes', async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
+    const country = sanitizeCountry(req.query.country);
+    if (!q) {
+      res.status(400).json({ error: 'Query parameter q is required' });
+      return;
+    }
+    try {
+      const params = new URLSearchParams({
+        term: q,
+        country,
+        media: 'music',
+        entity: 'song',
+        limit: '8',
+      });
+      const data = await fetchJsonWithTimeout<{ results?: ItunesSearchResult[] }>(
+        `https://itunes.apple.com/search?${params.toString()}`,
+        7000
+      );
+      const results = (data.results || []).map((item) => ({
+        ...item,
+        artworkUrl600: upgradeArtworkUrl(item.artworkUrl100 || item.artworkUrl60),
+      }));
+      res.json({ results });
+    } catch (err) {
       res.status(502).json({
-        error: err instanceof Error ? err.message : 'MusicBrainz lookup failed',
+        error: err instanceof Error ? err.message : 'iTunes catalog lookup failed',
       });
     }
   });

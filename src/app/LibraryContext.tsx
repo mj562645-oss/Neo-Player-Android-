@@ -9,6 +9,11 @@ import React, {
 } from 'react';
 import { parseLrc } from '../lib/lrcParser';
 import { isWebWritableTagFormat, writeAudioTagsToBlob } from '../lib/audioTagWriter';
+import {
+  hasFilenameNoise,
+  isPlaceholderAlbum,
+  isPlaceholderArtist,
+} from '../lib/filenameParser';
 import { sanitizeText } from '../lib/format';
 import { invalidateArtworkDataUrlCache } from '../lib/mediaSession';
 import { createId } from '../lib/utils';
@@ -1247,9 +1252,10 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
               (t) =>
                 !t.artworkId ||
                 !lyricsMapRef.current[t.id] ||
-                !t.artist ||
-                t.artist.trim().toLowerCase() === 'unknown artist' ||
-                t.album.trim().toLowerCase() === 'single'
+                isPlaceholderArtist(t.artist) ||
+                isPlaceholderAlbum(t.album) ||
+                hasFilenameNoise(t.title) ||
+                hasFilenameNoise(t.artist)
             )
             .map((t) => t.id)
         );
@@ -1284,9 +1290,10 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const hasLyrics = Boolean(lyricsMapRef.current[item.id]);
       const needsTagsOrCover =
         !item.artworkId ||
-        !item.artist ||
-        item.artist.trim().toLowerCase() === 'unknown artist' ||
-        item.album.trim().toLowerCase() === 'single' ||
+        isPlaceholderArtist(item.artist) ||
+        isPlaceholderAlbum(item.album) ||
+        hasFilenameNoise(item.title) ||
+        hasFilenameNoise(item.artist) ||
         item.genre.trim().toLowerCase() === 'unclassified';
 
       try {

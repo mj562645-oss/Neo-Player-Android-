@@ -97,6 +97,59 @@ export async function resolveArtworkDataUrl(artworkId?: string): Promise<string 
   return dataUrl;
 }
 
+async function fetchExternalArtworkDataUrl(artworkUrl: string): Promise<string | null> {
+  const cacheKey = `url:${artworkUrl}`;
+  const cached = dataUrlCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const res = await fetch(artworkUrl, { mode: 'cors' });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) return null;
+    const dataUrl = await blobToNotificationArtworkDataUrl(blob);
+    if (dataUrl) {
+      if (dataUrlCache.size > 40) {
+        const oldestKey = dataUrlCache.keys().next().value;
+        if (oldestKey) dataUrlCache.delete(oldestKey);
+      }
+      dataUrlCache.set(cacheKey, dataUrl);
+    }
+    return dataUrl;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveTrackArtworkDataUrl(
+  artworkId?: string,
+  artworkUrl?: string
+): Promise<string | null> {
+  if (artworkId) {
+    const local = await resolveArtworkDataUrl(artworkId);
+    if (local) return local;
+  }
+  if (artworkUrl) {
+    const remote = await fetchExternalArtworkDataUrl(artworkUrl);
+    if (remote) return remote;
+  }
+  return null;
+}
+
+export async function resolveTrackArtworkBase64(
+  artworkId?: string,
+  artworkUrl?: string
+): Promise<string | undefined> {
+  try {
+    const dataUrl = await resolveTrackArtworkDataUrl(artworkId, artworkUrl);
+    if (!dataUrl) return undefined;
+    const commaIdx = dataUrl.indexOf(',');
+    return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function invalidateArtworkDataUrlCache(artworkId?: string): void {
   if (artworkId) {
     dataUrlCache.delete(artworkId);

@@ -580,8 +580,8 @@ public class PlaybackService extends MediaSessionService {
             return;
         }
         float density = getResources().getDisplayMetrics().density;
-        cachedPillBlurredBg = ArtworkEffects.createFrostedBackdrop(decoded, 340, 100, Math.min(56f, 28f * density), 11);
-        cachedPillCover = ArtworkEffects.createRoundedCover(decoded, 112, Math.min(20f, 10f * density));
+        cachedPillBlurredBg = ArtworkEffects.createFrostedBackdrop(decoded, 520, 144, Math.min(56f, 28f * density), 3);
+        cachedPillCover = ArtworkEffects.createRoundedCover(decoded, 128, Math.min(20f, 10f * density));
         cachedPillArtHash = hash;
         decoded.recycle();
     }
@@ -679,21 +679,29 @@ public class PlaybackService extends MediaSessionService {
                     .putBoolean(KEY_LIVE_PILL_ENABLED, true)
                     .apply();
                 applyControlFlagsFromIntent(intent);
-                if (player.getMediaItemCount() == 0 || currentTitle == null || currentTitle.isEmpty()) {
+                String previewTitle = intent.getStringExtra("title");
+                String previewArtist = intent.getStringExtra("artist");
+                String artworkBase64 = intent.getStringExtra("artworkBase64");
+                boolean isExoPlaying = player.getMediaItemCount() > 0 && player.isPlaying();
+                if (!isExoPlaying || currentTitle == null || currentTitle.isEmpty()) {
                     previewPillActive = true;
-                    String previewTitle = intent.getStringExtra("title");
-                    String previewArtist = intent.getStringExtra("artist");
-                    currentTitle = (previewTitle != null && !previewTitle.isEmpty())
+                    String nextTitle = (previewTitle != null && !previewTitle.isEmpty())
                         ? previewTitle
-                        : getString(R.string.app_name);
-                    currentArtist = (previewArtist != null && !previewArtist.isEmpty())
-                        ? previewArtist
-                        : "Live Notification Pill";
-                    String artworkBase64 = intent.getStringExtra("artworkBase64");
+                        : ((currentTitle != null && !currentTitle.isEmpty()) ? currentTitle : getString(R.string.app_name));
+                    boolean titleChanged = currentTitle != null && !currentTitle.equals(nextTitle);
+                    currentTitle = nextTitle;
+
+                    if (previewArtist != null && !previewArtist.isEmpty()) {
+                        currentArtist = previewArtist;
+                    } else if (currentArtist == null || currentArtist.isEmpty()) {
+                        currentArtist = "Live Notification Pill";
+                    }
                     if (artworkBase64 != null && !artworkBase64.isEmpty()) {
                         try {
                             currentArtworkBytes = Base64.decode(artworkBase64, Base64.DEFAULT);
                         } catch (Exception ignored) { }
+                    } else if (titleChanged) {
+                        currentArtworkBytes = null;
                     }
                     NeoPlayerWidgetProvider.saveSnapshotAndRefresh(
                         this,
@@ -706,7 +714,7 @@ public class PlaybackService extends MediaSessionService {
                     );
                 }
                 updateLivePillNotification(
-                    player.getMediaItemCount() > 0 ? player.isPlaying() : intent.getBooleanExtra("isPlaying", true)
+                    isExoPlaying ? true : intent.getBooleanExtra("isPlaying", true)
                 );
             } else if (ACTION_STOP.equals(action)) {
                 playing = false;

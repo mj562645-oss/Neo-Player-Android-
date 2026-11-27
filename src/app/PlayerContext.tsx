@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { resolveArtworkDataUrl } from '../lib/mediaSession';
+import { resolveTrackArtworkBase64 as resolveTrackArtworkBase64FromMedia } from '../lib/mediaSession';
 import { createId } from '../lib/utils';
 import { syncScreenWakeLock, triggerHaptic } from '../services/androidPlatform';
 import { audioEngine } from '../services/audioEngine';
@@ -86,15 +86,8 @@ function getNativePlaybackUri(track?: Track | null): string | null {
 }
 
 async function resolveTrackArtworkBase64(track?: Track | null): Promise<string | undefined> {
-  if (!track?.artworkId) return undefined;
-  try {
-    const dataUrl = await resolveArtworkDataUrl(track.artworkId);
-    if (!dataUrl) return undefined;
-    const commaIdx = dataUrl.indexOf(',');
-    return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : undefined;
-  } catch {
-    return undefined;
-  }
+  if (!track) return undefined;
+  return resolveTrackArtworkBase64FromMedia(track.artworkId, track.artworkUrl);
 }
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -405,10 +398,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     settings.androidLivePillNotification,
   ]);
 
-  // Sync Web/PWA live album-art notification to the phone Notification Center when permission is already granted
+  // Sync Web/PWA (and YouTube playback on Android APK) live album-art pill to the phone Notification Center
   const lastPhoneNotifKeyRef = useRef<string>('');
   useEffect(() => {
-    if (isNativeAudioAvailable()) return;
+    const isNativeLocalTrack =
+      isNativeAudioAvailable() && Boolean(currentTrack) && Boolean(getNativePlaybackUri(currentTrack));
+    if (isNativeLocalTrack) return;
+
     const enabled = settings.androidLivePillNotification ?? true;
     if (!enabled || !currentTrack) {
       if (lastPhoneNotifKeyRef.current) {
@@ -417,11 +413,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       return;
     }
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
+
+    if (!isNativeAudioAvailable()) {
+      if (typeof window === 'undefined' || !('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+    }
 
     const syncMeta = settings.bluetoothMetadataSync ?? true;
-    const nextKey = `${currentTrack.id}:${isPlaying}:${currentTrack.title}:${currentTrack.artworkId || currentTrack.artworkUrl || ''}:${syncMeta}`;
+    const nextKey = `${currentTrack.id}:${isPlaying}:${currentTrack.title}:${currentTrack.artworkId || currentTrack.artworkUrl || ''}:${currentTrack.isFavourite}:${repeat}:${syncMeta}`;
     if (lastPhoneNotifKeyRef.current === nextKey) return;
     lastPhoneNotifKeyRef.current = nextKey;
 
@@ -434,6 +433,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       repeatMode: repeat,
       artworkId: syncMeta ? currentTrack.artworkId : undefined,
       artworkUrl: syncMeta ? currentTrack.artworkUrl : undefined,
+      requestPermissionIfNeeded: false,
     });
   }, [
     currentTrack?.id,

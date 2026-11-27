@@ -73,6 +73,7 @@ export interface NativeAudioPlugin {
     isPlaying?: boolean;
     isFavourite?: boolean;
     repeatMode?: RepeatMode;
+    promptPermission?: boolean;
   }): Promise<{ ok: boolean; permissionGranted: boolean }>;
   addListener(
     eventName: 'mediaAction',

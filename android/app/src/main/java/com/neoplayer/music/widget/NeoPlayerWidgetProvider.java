@@ -231,7 +231,7 @@ public class NeoPlayerWidgetProvider extends AppWidgetProvider {
         float density = context.getResources().getDisplayMetrics().density;
         float bgCorner = Math.min(48f, 24f * density);
         float thumbCorner = Math.min(24f, 12f * density);
-        cachedBlurredBackdrop = ArtworkEffects.createFrostedBackdrop(decoded, 320, 108, bgCorner, 10);
+        cachedBlurredBackdrop = ArtworkEffects.createFrostedBackdrop(decoded, 480, 144, bgCorner, 4);
         cachedRoundedThumb = ArtworkEffects.createRoundedCover(decoded, 128, thumbCorner);
         cachedArtHash = hash;
         decoded.recycle();

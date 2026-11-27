@@ -1,4 +1,11 @@
 import { extractAudioMetadata } from '../lib/audioMetadata';
+import {
+  cleanArtistName,
+  hasFilenameNoise,
+  isPlaceholderAlbum,
+  isPlaceholderArtist,
+  parseAudioFilename,
+} from '../lib/filenameParser';
 import { sanitizeText } from '../lib/format';
 import { parseLrc } from '../lib/lrcParser';
 import { createId } from '../lib/utils';
@@ -378,6 +385,54 @@ function base64ToBlob(base64: string, mimeType = 'image/jpeg'): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
+function resolveMediaStoreNames(item: MediaStoreTrackItem): {
+  title: string;
+  artist: string;
+  album: string;
+  albumArtist: string;
+} {
+  const fileFallback = parseAudioFilename(item.fileName || item.title || '');
+  const rawTitle = sanitizeText(item.title, '');
+  const rawArtist = sanitizeText(item.artist, '');
+  const rawAlbumArtist = sanitizeText(item.albumArtist, '');
+  const rawAlbum = sanitizeText(item.album, '');
+
+  const artistMissing = isPlaceholderArtist(rawArtist);
+  const titleNoisy =
+    !rawTitle ||
+    hasFilenameNoise(rawTitle) ||
+    rawTitle.toLowerCase() === item.fileName.replace(/\.[^/.]+$/, '').toLowerCase();
+
+  let title = rawTitle;
+  let artist = artistMissing ? '' : cleanArtistName(rawArtist);
+
+  if (titleNoisy || artistMissing) {
+    if (fileFallback.hasExplicitArtist && (artistMissing || hasFilenameNoise(rawTitle))) {
+      title = fileFallback.title;
+      if (artistMissing) artist = fileFallback.artist;
+    } else if (titleNoisy && rawTitle) {
+      const reparsed = parseAudioFilename(rawTitle);
+      title = reparsed.title;
+      if (artistMissing && reparsed.hasExplicitArtist) {
+        artist = reparsed.artist;
+      }
+    }
+  }
+
+  if (!title) title = fileFallback.title || sanitizeText(item.fileName, 'Untitled Track');
+  if (!artist) artist = fileFallback.artist || 'Unknown Artist';
+
+  const album =
+    isPlaceholderAlbum(rawAlbum) || (artistMissing && !item.artworkBase64 && isPlaceholderAlbum(rawAlbum))
+      ? 'Single'
+      : rawAlbum;
+  const albumArtist = isPlaceholderArtist(rawAlbumArtist)
+    ? artist
+    : cleanArtistName(rawAlbumArtist) || artist;
+
+  return { title, artist, album, albumArtist };
+}
+
 export async function importMediaStoreTracks(
   scannedTracks: MediaStoreTrackItem[],
   existingTracks: Track[],
@@ -430,12 +485,14 @@ export async function importMediaStoreTracks(
         }
       }
 
+      const resolved = resolveMediaStoreNames(item);
+
       const track: Track = {
         id: trackId,
-        title: sanitizeText(item.title, item.fileName),
-        artist: sanitizeText(item.artist, 'Unknown Artist'),
-        album: sanitizeText(item.album, 'Single'),
-        albumArtist: sanitizeText(item.albumArtist || item.artist, 'Unknown Artist'),
+        title: resolved.title,
+        artist: resolved.artist,
+        album: resolved.album,
+        albumArtist: resolved.albumArtist,
         genre: sanitizeText(item.genre, 'Unclassified'),
         year: item.year,
         trackNumber: item.trackNumber,
@@ -518,12 +575,14 @@ export async function importDocumentTracks(
         }
       }
 
+      const resolved = resolveMediaStoreNames(item);
+
       const track: Track = {
         id: createId('trk'),
-        title: sanitizeText(item.title, item.fileName),
-        artist: sanitizeText(item.artist, 'Unknown Artist'),
-        album: sanitizeText(item.album, 'Single'),
-        albumArtist: sanitizeText(item.albumArtist || item.artist, 'Unknown Artist'),
+        title: resolved.title,
+        artist: resolved.artist,
+        album: resolved.album,
+        albumArtist: resolved.albumArtist,
         genre: sanitizeText(item.genre, 'Unclassified'),
         year: item.year,
         trackNumber: item.trackNumber,
