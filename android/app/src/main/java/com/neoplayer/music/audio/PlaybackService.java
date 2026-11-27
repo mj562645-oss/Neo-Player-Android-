@@ -71,6 +71,9 @@ public class PlaybackService extends MediaSessionService {
                 if (value) ended = false;
                 positionMs = Math.max(0, player.getCurrentPosition());
                 durationMs = Math.max(0, player.getDuration());
+                // Playback state is the authoritative play/pause signal to JavaScript.
+                // Do not also emit mediaAction(play/pause): the UI responds to those actions
+                // by issuing another controller command, creating a command-feedback loop.
                 NativeAudioPlugin.notifyPlaybackState(value, ended, positionMs, durationMs);
             }
 
@@ -144,14 +147,16 @@ public class PlaybackService extends MediaSessionService {
 
             @Override
             public void play() {
+                // Let Media3 update playback; onIsPlayingChanged notifies the UI.
+                // Emitting a JS play action here loops back into another controller.play().
                 super.play();
-                NativeAudioPlugin.notifyMediaAction("play");
             }
 
             @Override
             public void pause() {
+                // Let Media3 update playback; onIsPlayingChanged notifies the UI.
+                // Emitting a JS pause action here loops back into another controller.pause().
                 super.pause();
-                NativeAudioPlugin.notifyMediaAction("pause");
             }
         };
 
