@@ -1,3 +1,4 @@
+export type { ListeningHistoryEntry } from './listeningHistory';
 export type ThemePreference = 'light' | 'dark' | 'system';
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -168,6 +169,7 @@ export interface PersonalizationSettings {
   fontStyle: FontStylePreset;
   artworkStyle: ArtworkDisplayStyle;
   nowPlayingArtworkBackground: boolean;
+  liveMediaPill: boolean;
 }
 
 export interface EqualizerSettings {
@@ -207,6 +209,7 @@ export interface UserSettings {
   notifyTrending: boolean;
   notifyFavoriteArtists: boolean;
   osNotificationsEnabled: boolean;
+  androidLivePillNotification: boolean;
   audioOutputDeviceId: string;
   pauseOnBluetoothDisconnect: boolean;
   bluetoothMetadataSync: boolean;

@@ -13,6 +13,10 @@ import { syncScreenWakeLock, triggerHaptic } from '../services/androidPlatform';
 import { audioEngine } from '../services/audioEngine';
 import NativeAudio, { isNativeAudioAvailable } from '../plugins/nativeAudio';
 import { db, DEFAULT_PLAYBACK_STATE } from '../services/db';
+import {
+  clearPhoneNotificationCenterPill,
+  showPhoneNotificationCenterPill,
+} from '../services/phoneNotifications';
 import { youtubePlayer } from '../services/youtubePlayer';
 import type { PlaybackState, QueueItem, RepeatMode, Track } from '../types/music';
 import { useLibrary } from './LibraryContext';
@@ -245,6 +249,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         muted: settingsRef.current.muted,
         playbackRate: settingsRef.current.playbackRate,
         pauseOnBluetoothDisconnect: settingsRef.current.pauseOnBluetoothDisconnect ?? true,
+        isFavourite: Boolean(targetTrack.isFavourite),
+        repeatMode: repeatRef.current,
+        livePillNotification: settingsRef.current.androidLivePillNotification ?? true,
       });
     },
     []
@@ -350,7 +357,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [playNativeTrack, recordTrackPlay]
   );
 
-  // Sync metadata / artwork edits immediately to the active OS notification & Bluetooth AVRCP
+  // Sync metadata / artwork / Like / Repeat edits immediately to OS MediaSession, Lockscreen, Now Bar & 4x1 Widget
   useEffect(() => {
     if (!currentTrack) return;
     const syncMeta = settings.bluetoothMetadataSync ?? true;
@@ -360,11 +367,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
     const nativeUri = getNativePlaybackUri(currentTrack);
     if (isNativeAudioAvailable() && nativeUri) {
+      const controlSync = {
+        isFavourite: Boolean(currentTrack.isFavourite),
+        repeatMode: repeat,
+        livePillNotification: settings.androidLivePillNotification ?? true,
+      };
       if (!syncMeta) {
         void NativeAudio.updateMetadata({
           title: 'Neo Player',
           artist: 'Audio Playback',
           album: '',
+          ...controlSync,
         });
         return;
       }
@@ -374,6 +387,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           artist: currentTrack.artist,
           album: currentTrack.album,
           artworkBase64,
+          ...controlSync,
         })
       );
       return;
@@ -385,6 +399,53 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     currentTrack?.artist,
     currentTrack?.album,
     currentTrack?.artworkId,
+    currentTrack?.isFavourite,
+    repeat,
+    settings.bluetoothMetadataSync,
+    settings.androidLivePillNotification,
+  ]);
+
+  // Sync Web/PWA live album-art notification to the phone Notification Center when permission is already granted
+  const lastPhoneNotifKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (isNativeAudioAvailable()) return;
+    const enabled = settings.androidLivePillNotification ?? true;
+    if (!enabled || !currentTrack) {
+      if (lastPhoneNotifKeyRef.current) {
+        lastPhoneNotifKeyRef.current = '';
+        void clearPhoneNotificationCenterPill();
+      }
+      return;
+    }
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    const syncMeta = settings.bluetoothMetadataSync ?? true;
+    const nextKey = `${currentTrack.id}:${isPlaying}:${currentTrack.title}:${currentTrack.artworkId || currentTrack.artworkUrl || ''}:${syncMeta}`;
+    if (lastPhoneNotifKeyRef.current === nextKey) return;
+    lastPhoneNotifKeyRef.current = nextKey;
+
+    void showPhoneNotificationCenterPill({
+      title: syncMeta ? currentTrack.title : 'Neo Player',
+      artist: syncMeta ? currentTrack.artist : 'Audio Playback',
+      album: syncMeta ? currentTrack.album : '',
+      isPlaying,
+      isFavourite: Boolean(currentTrack.isFavourite),
+      repeatMode: repeat,
+      artworkId: syncMeta ? currentTrack.artworkId : undefined,
+      artworkUrl: syncMeta ? currentTrack.artworkUrl : undefined,
+    });
+  }, [
+    currentTrack?.id,
+    currentTrack?.title,
+    currentTrack?.artist,
+    currentTrack?.album,
+    currentTrack?.artworkId,
+    currentTrack?.artworkUrl,
+    currentTrack?.isFavourite,
+    isPlaying,
+    repeat,
+    settings.androidLivePillNotification,
     settings.bluetoothMetadataSync,
   ]);
 
@@ -757,6 +818,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         void nextTrack();
       } else if (action === 'previous') {
         void prevTrack();
+      } else if (action === 'like') {
+        const activeTrack = currentTrackRef.current;
+        if (activeTrack) {
+          void toggleTrackLike(activeTrack);
+        }
+      } else if (action === 'repeat') {
+        setRepeat((prev) => {
+          const next: RepeatMode = prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off';
+          persistState({ repeat: next });
+          return next;
+        });
       } else if (action === 'ended') {
         void handleNativeTrackEnded();
       }
@@ -786,7 +858,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       void handleMedia.then((sub) => sub.remove());
       void handleState.then((sub) => sub.remove());
     };
-  }, [playActive, pauseActive, nextTrack, prevTrack, handleNativeTrackEnded, saveTrackPosition, persistState]);
+  }, [
+    playActive,
+    pauseActive,
+    nextTrack,
+    prevTrack,
+    toggleTrackLike,
+    handleNativeTrackEnded,
+    saveTrackPosition,
+    persistState,
+  ]);
 
   useEffect(() => {
     if (!currentTrack || !isNativeAudioAvailable() || !getNativePlaybackUri(currentTrack)) return;

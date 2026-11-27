@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import type { RepeatMode } from '../types/music';
 
 export interface NativeAudioStatus {
   isPlaying: boolean;
@@ -8,7 +9,7 @@ export interface NativeAudioStatus {
 }
 
 export interface NativeMediaActionEvent {
-  action: 'play' | 'pause' | 'next' | 'previous' | 'ended';
+  action: 'play' | 'pause' | 'next' | 'previous' | 'like' | 'repeat' | 'ended';
 }
 
 export interface NativePlaybackStateEvent {
@@ -32,6 +33,9 @@ export interface NativeAudioPlugin {
     muted?: boolean;
     playbackRate?: number;
     pauseOnBluetoothDisconnect?: boolean;
+    isFavourite?: boolean;
+    repeatMode?: RepeatMode;
+    livePillNotification?: boolean;
   }): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -43,6 +47,9 @@ export interface NativeAudioPlugin {
     playbackRate?: number;
     volumeNormalization?: boolean;
     pauseOnBluetoothDisconnect?: boolean;
+    isFavourite?: boolean;
+    repeatMode?: RepeatMode;
+    livePillNotification?: boolean;
     eqEnabled?: boolean;
     eqBass?: number;
     eqMid?: number;
@@ -53,8 +60,20 @@ export interface NativeAudioPlugin {
     artist: string;
     album?: string;
     artworkBase64?: string;
+    isFavourite?: boolean;
+    repeatMode?: RepeatMode;
+    livePillNotification?: boolean;
   }): Promise<void>;
   getStatus(): Promise<NativeAudioStatus>;
+  requestNotificationPermission(): Promise<{ granted: boolean }>;
+  previewLivePillNotification(options: {
+    title: string;
+    artist: string;
+    artworkBase64?: string;
+    isPlaying?: boolean;
+    isFavourite?: boolean;
+    repeatMode?: RepeatMode;
+  }): Promise<{ ok: boolean; permissionGranted: boolean }>;
   addListener(
     eventName: 'mediaAction',
     listenerFunc: (event: NativeMediaActionEvent) => void

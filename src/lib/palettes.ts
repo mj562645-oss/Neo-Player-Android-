@@ -318,6 +318,7 @@ export const DEFAULT_PERSONALIZATION: PersonalizationSettings = {
   fontStyle: 'geometric',
   artworkStyle: 'cover',
   nowPlayingArtworkBackground: true,
+  liveMediaPill: true,
 };
 
 export function normalizeUiThemeId(themeId?: string): UiThemeId {

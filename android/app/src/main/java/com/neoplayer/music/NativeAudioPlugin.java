@@ -161,7 +161,8 @@ public class NativeAudioPlugin extends Plugin {
             try {
                 MediaMetadata.Builder metadata = new MediaMetadata.Builder()
                     .setTitle(call.getString("title", "Unknown title"))
-                    .setArtist(call.getString("artist", "Unknown artist"));
+                    .setArtist(call.getString("artist", "Unknown artist"))
+                    .setIsPlayable(true);
                 String album = call.getString("album", "");
                 if (album != null && !album.isEmpty()) metadata.setAlbumTitle(album);
                 String artwork = call.getString("artworkBase64");
@@ -174,11 +175,11 @@ public class NativeAudioPlugin extends Plugin {
                     .setUri(Uri.parse(uri))
                     .setMediaMetadata(metadata.build())
                     .build();
+                applyOptions(call);
                 controller.setMediaItem(item);
                 controller.prepare();
                 long positionMs = Math.max(0L, call.getLong("positionMs", 0L));
                 if (positionMs > 0L) controller.seekTo(positionMs);
-                applyOptions(call);
                 if (call.getBoolean("autoplay", true)) controller.play(); else controller.pause();
                 call.resolve();
             } catch (Exception e) {
@@ -194,6 +195,15 @@ public class NativeAudioPlugin extends Plugin {
         if (call.hasOption("playbackRate")) i.putExtra("playbackRate", call.getFloat("playbackRate", 1.0f));
         if (call.hasOption("pauseOnBluetoothDisconnect")) {
             i.putExtra("pauseOnBluetoothDisconnect", call.getBoolean("pauseOnBluetoothDisconnect", true));
+        }
+        if (call.hasOption("isFavourite")) {
+            i.putExtra("isFavourite", call.getBoolean("isFavourite", false));
+        }
+        if (call.hasOption("repeatMode")) {
+            i.putExtra("repeatMode", call.getString("repeatMode", "off"));
+        }
+        if (call.hasOption("livePillNotification")) {
+            i.putExtra("livePillNotification", call.getBoolean("livePillNotification", true));
         }
         try { getContext().startService(i); } catch (Exception ignored) { }
     }
@@ -234,6 +244,15 @@ public class NativeAudioPlugin extends Plugin {
         if (call.hasOption("pauseOnBluetoothDisconnect")) {
             i.putExtra("pauseOnBluetoothDisconnect", call.getBoolean("pauseOnBluetoothDisconnect", true));
         }
+        if (call.hasOption("isFavourite")) {
+            i.putExtra("isFavourite", call.getBoolean("isFavourite", false));
+        }
+        if (call.hasOption("repeatMode")) {
+            i.putExtra("repeatMode", call.getString("repeatMode", "off"));
+        }
+        if (call.hasOption("livePillNotification")) {
+            i.putExtra("livePillNotification", call.getBoolean("livePillNotification", true));
+        }
         if (call.hasOption("eqEnabled")) {
             i.putExtra("eqEnabled", call.getBoolean("eqEnabled", false));
             i.putExtra("eqBass", call.getFloat("eqBass", 0f));
@@ -251,6 +270,15 @@ public class NativeAudioPlugin extends Plugin {
             .putExtra("title", call.getString("title", "Unknown title"))
             .putExtra("artist", call.getString("artist", "Unknown artist"))
             .putExtra("album", call.getString("album", ""));
+        if (call.hasOption("isFavourite")) {
+            i.putExtra("isFavourite", call.getBoolean("isFavourite", false));
+        }
+        if (call.hasOption("repeatMode")) {
+            i.putExtra("repeatMode", call.getString("repeatMode", "off"));
+        }
+        if (call.hasOption("livePillNotification")) {
+            i.putExtra("livePillNotification", call.getBoolean("livePillNotification", true));
+        }
         String artworkBase64 = call.getString("artworkBase64");
         if (artworkBase64 != null && !artworkBase64.isEmpty()) i.putExtra("artworkBase64", artworkBase64);
         try { getContext().startService(i); call.resolve(); }
@@ -267,5 +295,78 @@ public class NativeAudioPlugin extends Plugin {
             result.put("durationMs", Math.max(0L, controller.getDuration()));
             call.resolve(result);
         });
+    }
+
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && getPermissionState("notifications") != PermissionState.GRANTED) {
+            requestPermissionForAlias("notifications", call, "onlyNotificationPermissionCallback");
+            return;
+        }
+        JSObject result = new JSObject();
+        result.put("granted", true);
+        call.resolve(result);
+    }
+
+    @PermissionCallback
+    private void onlyNotificationPermissionCallback(PluginCall call) {
+        boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+            || getPermissionState("notifications") == PermissionState.GRANTED;
+        JSObject result = new JSObject();
+        result.put("granted", granted);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void previewLivePillNotification(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && getPermissionState("notifications") != PermissionState.GRANTED) {
+            requestPermissionForAlias("notifications", call, "previewLivePillPermissionCallback");
+            return;
+        }
+        dispatchPreviewLivePill(call, true);
+    }
+
+    @PermissionCallback
+    private void previewLivePillPermissionCallback(PluginCall call) {
+        boolean granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+            || getPermissionState("notifications") == PermissionState.GRANTED;
+        dispatchPreviewLivePill(call, granted);
+    }
+
+    private void dispatchPreviewLivePill(PluginCall call, boolean granted) {
+        if (!granted) {
+            JSObject res = new JSObject();
+            res.put("ok", false);
+            res.put("permissionGranted", false);
+            call.resolve(res);
+            return;
+        }
+        Intent i = new Intent(getContext(), PlaybackService.class)
+            .setAction(PlaybackService.ACTION_PREVIEW_LIVE_PILL)
+            .putExtra("title", call.getString("title", "Neo Player"))
+            .putExtra("artist", call.getString("artist", "Live Notification Pill"))
+            .putExtra("isPlaying", call.getBoolean("isPlaying", true))
+            .putExtra("livePillNotification", true);
+        if (call.hasOption("isFavourite")) {
+            i.putExtra("isFavourite", call.getBoolean("isFavourite", false));
+        }
+        if (call.hasOption("repeatMode")) {
+            i.putExtra("repeatMode", call.getString("repeatMode", "off"));
+        }
+        String artworkBase64 = call.getString("artworkBase64");
+        if (artworkBase64 != null && !artworkBase64.isEmpty()) {
+            i.putExtra("artworkBase64", artworkBase64);
+        }
+        try {
+            getContext().startService(i);
+            JSObject res = new JSObject();
+            res.put("ok", true);
+            res.put("permissionGranted", true);
+            call.resolve(res);
+        } catch (Exception e) {
+            call.reject("Could not post Live Pill notification: " + e.getMessage(), e);
+        }
     }
 }

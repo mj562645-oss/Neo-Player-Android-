@@ -78,6 +78,7 @@ function syncAudioOptionsToEngines(next: UserSettings, fullSync = false, patch?:
       patch?.playbackRate !== undefined ||
       patch?.volumeNormalization !== undefined ||
       patch?.pauseOnBluetoothDisconnect !== undefined ||
+      patch?.androidLivePillNotification !== undefined ||
       patch?.equalizer !== undefined)
   ) {
     void NativeAudio.setPlaybackOptions({
@@ -86,6 +87,7 @@ function syncAudioOptionsToEngines(next: UserSettings, fullSync = false, patch?:
       playbackRate: next.playbackRate,
       volumeNormalization: next.volumeNormalization,
       pauseOnBluetoothDisconnect: next.pauseOnBluetoothDisconnect ?? true,
+      livePillNotification: next.androidLivePillNotification ?? true,
       eqEnabled: next.equalizer.enabled,
       eqBass: next.equalizer.bass,
       eqMid: next.equalizer.mid,

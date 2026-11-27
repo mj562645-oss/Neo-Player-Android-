@@ -496,6 +496,22 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
           />
         </div>
 
+        <div className="p-3.5 neo-btn-radius liquid-glass-subtle flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Bottom Album-Art Media Pill</p>
+            <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
+              Float a compact mini player pill with blurred album artwork, Like, and Repeat controls
+            </p>
+          </div>
+          <Switch
+            checked={p.liveMediaPill ?? true}
+            onCheckedChange={(checked) =>
+              void updatePersonalization({ liveMediaPill: checked })
+            }
+            aria-label="Bottom album-art media pill"
+          />
+        </div>
+
         <p className="text-sm font-semibold">App Background Style</p>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">

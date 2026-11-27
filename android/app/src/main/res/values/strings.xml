@@ -4,4 +4,8 @@
     <string name="title_activity_main">Neo Player</string>
     <string name="package_name">com.neoplayer.music</string>
     <string name="custom_url_scheme">com.neoplayer.music</string>
+    <string name="widget_name">Neo Player (4×1 Frosted)</string>
+    <string name="widget_description">Frosted blur mini player with blurred album art backdrop, Like, Repeat, and playback controls.</string>
+    <string name="widget_idle_subtitle">Tap to open music library</string>
+    <string name="notification_channel_name">Live Album-Art Pill</string>
 </resources>

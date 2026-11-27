@@ -49,6 +49,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   notifyTrending: true,
   notifyFavoriteArtists: true,
   osNotificationsEnabled: false,
+  androidLivePillNotification: true,
   audioOutputDeviceId: '',
   pauseOnBluetoothDisconnect: true,
   bluetoothMetadataSync: true,

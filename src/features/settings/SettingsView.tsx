@@ -25,6 +25,7 @@ import { useDiscovery } from '../../app/DiscoveryContext';
 import { useLibrary } from '../../app/LibraryContext';
 import { usePlayer } from '../../app/PlayerContext';
 import { useTheme } from '../../app/ThemeContext';
+import { useToast } from '../../app/ToastContext';
 import { useYouTube } from '../../app/YouTubeContext';
 import { formatBytes } from '../../lib/format';
 import { CHART_COUNTRIES } from '../../lib/countries';
@@ -38,6 +39,11 @@ import { cn } from '../../lib/utils';
 import { MediaStore, isNativeMediaStoreAvailable } from '../../plugins/mediaStore';
 import { getPlatformInfo } from '../../services/androidPlatform';
 import { audioEngine, type AudioOutputDevice } from '../../services/audioEngine';
+import {
+  clearPhoneNotificationCenterPill,
+  requestPhoneNotificationPermission,
+  showPhoneNotificationCenterPill,
+} from '../../services/phoneNotifications';
 import type { StorageBreakdown } from '../../types/music';
 import { EqualizerPanel } from '../../components/EqualizerPanel';
 import { GoogleSignInButton } from '../../components/GoogleSignInButton';
@@ -69,8 +75,9 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
     clearPlayHistory,
     clearAllLibrary,
   } = useLibrary();
-  const { clearQueue } = usePlayer();
+  const { currentTrack, isPlaying, repeat, clearQueue } = usePlayer();
   const { settings, updateSettings, toggleFollowArtist } = useTheme();
+  const { showToast } = useToast();
   const { requestOsNotificationPermission, refreshRadar } = useDiscovery();
   const {
     user: ytUser,
@@ -510,6 +517,110 @@ export const SettingsView: React.FC<{ onReplayIntro?: () => void }> = ({ onRepla
                   void updateSettings({ bluetoothMetadataSync: checked })
                 }
                 aria-label="Broadcast track info and artwork to Bluetooth"
+              />
+            }
+          />
+        </div>
+
+        {/* Phone Notification Center Live Pill, Lockscreen & Home Widget */}
+        <div className="p-4 neo-btn-radius liquid-glass-subtle space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[var(--neo-accent)]" />
+              <h3 className="text-sm font-semibold">
+                Phone Notification Center, Lockscreen &amp; 4×1 Widget
+              </h3>
+            </div>
+            <GlassButton
+              size="sm"
+              onClick={() => {
+                const payload = currentTrack
+                  ? {
+                      title: currentTrack.title,
+                      artist: currentTrack.artist,
+                      album: currentTrack.album,
+                      isPlaying,
+                      isFavourite: Boolean(currentTrack.isFavourite),
+                      repeatMode: repeat,
+                      artworkId: currentTrack.artworkId,
+                      artworkUrl: currentTrack.artworkUrl,
+                      requestPermissionIfNeeded: true,
+                    }
+                  : {
+                      title: 'Neo Player Live Pill',
+                      artist: 'Swipe down your phone Notification Center',
+                      isPlaying: true,
+                      requestPermissionIfNeeded: true,
+                    };
+                void updateSettings({ androidLivePillNotification: true });
+                void showPhoneNotificationCenterPill(payload).then((res) => {
+                  showToast(
+                    res.message ||
+                      (res.ok
+                        ? 'Live Pill posted to your phone Notification Center.'
+                        : 'Allow OS notifications to display the pill in your phone Notification Center.'),
+                    res.ok ? 'success' : 'info'
+                  );
+                });
+              }}
+            >
+              <span>Send to Notification Center</span>
+            </GlassButton>
+          </div>
+
+          <SettingRow
+            title="Live Pill in Phone Notification Center"
+            description="Show an album-art Live Notification Pill in your phone's notification shade alongside Android 10+ lockscreen Like/Repeat, Samsung Now Bar, and the 4×1 frosted widget"
+            control={
+              <Switch
+                checked={settings.androidLivePillNotification ?? true}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    void requestPhoneNotificationPermission().then((granted) => {
+                      void updateSettings({ androidLivePillNotification: granted });
+                      if (granted && currentTrack) {
+                        void showPhoneNotificationCenterPill({
+                          title: currentTrack.title,
+                          artist: currentTrack.artist,
+                          album: currentTrack.album,
+                          isPlaying,
+                          isFavourite: Boolean(currentTrack.isFavourite),
+                          repeatMode: repeat,
+                          artworkId: currentTrack.artworkId,
+                          artworkUrl: currentTrack.artworkUrl,
+                        });
+                        showToast('Phone Notification Center Live Pill enabled', 'success');
+                      } else if (!granted) {
+                        showToast(
+                          'Notification permission was not granted in your device settings.',
+                          'info'
+                        );
+                      } else {
+                        showToast('Phone Notification Center Live Pill enabled', 'success');
+                      }
+                    });
+                  } else {
+                    void updateSettings({ androidLivePillNotification: false });
+                    void clearPhoneNotificationCenterPill();
+                  }
+                }}
+                aria-label="Live pill in phone notification center"
+              />
+            }
+          />
+
+          <SettingRow
+            title="In-App Bottom Album-Art Media Pill"
+            description="Render the floating bottom mini player as a compact pill with blurred album art, Like, and Repeat controls"
+            control={
+              <Switch
+                checked={settings.personalization.liveMediaPill ?? true}
+                onCheckedChange={(checked) =>
+                  void updateSettings({
+                    personalization: { ...settings.personalization, liveMediaPill: checked },
+                  })
+                }
+                aria-label="In-app bottom album-art media pill"
               />
             }
           />

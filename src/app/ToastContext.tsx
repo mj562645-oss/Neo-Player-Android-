@@ -2,16 +2,19 @@ import React, { createContext, useCallback, useContext, useState } from 'react';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { createId } from '../lib/utils';
 
-type ToastVariant = 'info' | 'success' | 'error';
+export type ToastVariant = 'info' | 'success' | 'error';
 
-interface ToastItem {
+export interface ToastItem {
   id: string;
   message: string;
   variant: ToastVariant;
+  createdAt: number;
 }
 
 interface ToastContextValue {
+  toasts: ToastItem[];
   showToast: (message: string, variant?: ToastVariant) => void;
+  dismissToast: (id: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -19,23 +22,23 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const dismiss = useCallback((id: string) => {
+  const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const showToast = useCallback(
     (message: string, variant: ToastVariant = 'info') => {
       const id = createId('toast');
-      setToasts((prev) => [...prev.slice(-3), { id, message, variant }]);
+      setToasts((prev) => [...prev.slice(-3), { id, message, variant, createdAt: Date.now() }]);
       window.setTimeout(() => {
-        dismiss(id);
+        dismissToast(id);
       }, 3600);
     },
-    [dismiss]
+    [dismissToast]
   );
 
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={{ toasts, showToast, dismissToast }}>
       {children}
       <div
         aria-live="polite"
@@ -59,7 +62,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             <span className="flex-1 leading-snug">{toast.message}</span>
             <button
               type="button"
-              onClick={() => dismiss(toast.id)}
+              onClick={() => dismissToast(toast.id)}
               aria-label="Dismiss notification"
               className="p-1 rounded-lg text-[#6E6E73] hover:text-[#111216] dark:text-[#98989D] dark:hover:text-white transition-colors"
             >

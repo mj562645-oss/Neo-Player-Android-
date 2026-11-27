@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/pill_root"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:background="@drawable/live_pill_scrim"
+    android:clipToOutline="true">
+
+    <!-- Blurred album art fills the background of the notification pill -->
+    <ImageView
+        android:id="@+id/pill_bg_art"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <!-- Smooth pill contrast scrim -->
+    <ImageView
+        android:id="@+id/pill_bg_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/live_pill_scrim"
+        android:scaleType="fitXY"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingEnd="8dp">
+
+        <ImageView
+            android:id="@+id/pill_album_art"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/widget_art_placeholder"
+            android:padding="9dp"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_media_note"
+            android:contentDescription="Album artwork" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/pill_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/app_name"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/pill_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/widget_idle_subtitle"
+                android:textColor="#D6D9E2"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/pill_btn_like"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="@android:color/transparent"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_media_heart_outline"
+                android:contentDescription="Toggle favourite" />
+
+            <ImageButton
+                android:id="@+id/pill_btn_prev"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="@android:color/transparent"
+                android:padding="4dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_media_prev"
+                android:contentDescription="Previous track" />
+
+            <ImageButton
+                android:id="@+id/pill_btn_play_pause"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/widget_play_pill_bg"
+                android:padding="7dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_media_play"
+                android:contentDescription="Play or pause" />
+
+            <ImageButton
+                android:id="@+id/pill_btn_next"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="@android:color/transparent"
+                android:padding="4dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_media_next"
+                android:contentDescription="Next track" />
+
+            <ImageButton
+                android:id="@+id/pill_btn_repeat"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="@android:color/transparent"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_media_repeat_off"
+                android:contentDescription="Cycle repeat mode" />
+        </LinearLayout>
+    </LinearLayout>
+</RelativeLayout>
