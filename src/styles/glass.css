@@ -77,23 +77,29 @@
   border: 1px solid var(--neo-glass-border);
 }
 
-[data-ui-theme="windows"] .liquid-glass,
-[data-ui-theme="windows"] .liquid-glass-elevated {
+/* Neo remains the original expressive liquid-glass identity. */
+[data-ui-theme="neo"] .liquid-glass,
+[data-ui-theme="neo"] .liquid-glass-elevated {
   box-shadow: inset 0 1px 0 0 var(--neo-glass-highlight), var(--neo-glass-shadow);
 }
 
+/*
+ * Premium Material-inspired minimal surfaces: quiet tonal layers, crisp outlines,
+ * no backdrop blur, and restrained elevation. The existing Material palette and
+ * page components continue to drive all app behaviour.
+ */
 [data-ui-theme="material"] .liquid-glass,
 [data-ui-theme="material"] .liquid-glass-elevated {
-  box-shadow: var(--neo-glass-shadow);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: 0 1px 2px rgba(18, 20, 28, .045), 0 5px 18px -10px rgba(18, 20, 28, .12);
 }
 
-[data-ui-theme="material"] *:not(.neo-artwork-backdrop-blur),
-[data-ui-theme="windows"] *:not(.neo-artwork-backdrop-blur) {
+[data-ui-theme="material"] .liquid-glass-subtle {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-/* Google Material Design 3 navigation & control style */
 [data-ui-theme="material"] .neo-nav-item-active {
   border-radius: 9999px;
   background-color: var(--neo-m3-primary-container) !important;
@@ -108,17 +114,72 @@
   color: var(--neo-m3-on-primary-container);
 }
 
-/* Windows 11 Fluent / WinUI 3 navigation indicator bar & crisp fills */
+[data-ui-theme="material"] .neo-card-radius {
+  border: 1px solid color-mix(in srgb, var(--neo-accent) 8%, transparent);
+}
+
+/*
+ * Windows Fluent-inspired Mica. Mica is a translucent, wallpaper-tinted material,
+ * not a solid card with a blur filter disabled. Keep blur on intentional glass
+ * surfaces only so the ambient app backdrop can diffuse through them.
+ */
+[data-ui-theme="windows"] body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 18% 12%, color-mix(in srgb, var(--neo-accent) 12%, transparent), transparent 48%),
+    radial-gradient(ellipse at 84% 78%, color-mix(in srgb, var(--neo-secondary) 9%, transparent), transparent 46%),
+    linear-gradient(145deg, #f8f9fb, #e9edf3 58%, #f3f5f8);
+}
+
+.dark[data-ui-theme="windows"] body::before {
+  background:
+    radial-gradient(ellipse at 18% 12%, color-mix(in srgb, var(--neo-accent) 17%, transparent), transparent 48%),
+    radial-gradient(ellipse at 84% 78%, color-mix(in srgb, var(--neo-secondary) 13%, transparent), transparent 46%),
+    linear-gradient(145deg, #242832, #1d2027 58%, #292d35);
+}
+
+[data-ui-theme="windows"] .liquid-glass,
+[data-ui-theme="windows"] .liquid-glass-elevated {
+  background: color-mix(in srgb, rgba(247, 249, 252, .72) 92%, var(--neo-accent) 8%) !important;
+  backdrop-filter: blur(24px) saturate(142%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(142%) !important;
+  border: 1px solid rgba(255, 255, 255, .64);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 8px 26px -18px rgba(20, 30, 48, .34);
+}
+
+[data-ui-theme="windows"] .liquid-glass-subtle {
+  background: rgba(255, 255, 255, .42) !important;
+  backdrop-filter: blur(18px) saturate(136%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(136%) !important;
+  border: 1px solid rgba(255, 255, 255, .48);
+}
+
+.dark[data-ui-theme="windows"] .liquid-glass,
+.dark[data-ui-theme="windows"] .liquid-glass-elevated {
+  background: color-mix(in srgb, rgba(36, 39, 47, .76) 92%, var(--neo-accent) 8%) !important;
+  border-color: rgba(255, 255, 255, .13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 10px 28px -18px rgba(0, 0, 0, .66);
+}
+
+.dark[data-ui-theme="windows"] .liquid-glass-subtle {
+  background: rgba(38, 41, 49, .58) !important;
+  border-color: rgba(255, 255, 255, .11);
+}
+
 [data-ui-theme="windows"] .neo-nav-item-active {
   position: relative;
-  border-radius: 5px;
-  background-color: rgba(0, 0, 0, 0.045) !important;
-  color: #1A1A1A !important;
+  border-radius: 6px;
+  background-color: rgba(20, 34, 52, .07) !important;
+  color: #17202d !important;
 }
 
 .dark[data-ui-theme="windows"] .neo-nav-item-active {
-  background-color: rgba(255, 255, 255, 0.065) !important;
-  color: #FFFFFF !important;
+  background-color: rgba(255, 255, 255, .09) !important;
+  color: #f5f7fa !important;
 }
 
 [data-ui-theme="windows"] .neo-nav-item-active::before {
@@ -136,68 +197,65 @@
   position: relative;
   padding: 4px 14px;
   border-radius: 6px;
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: rgba(0, 0, 0, .06);
 }
 
 .dark[data-ui-theme="windows"] .neo-mobile-nav-pill {
-  background-color: rgba(255, 255, 255, 0.075);
+  background-color: rgba(255, 255, 255, .09);
 }
 
-.neo-card-radius {
-  border-radius: var(--neo-radius-card);
+/* Keep a legible, graceful material fallback when blur is unavailable/disabled. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-ui-theme="windows"] .liquid-glass,
+  [data-ui-theme="windows"] .liquid-glass-elevated {
+    background: rgba(242, 245, 249, .96) !important;
+  }
+  .dark[data-ui-theme="windows"] .liquid-glass,
+  .dark[data-ui-theme="windows"] .liquid-glass-elevated {
+    background: rgba(35, 38, 46, .96) !important;
+  }
 }
 
-.neo-btn-radius {
-  border-radius: var(--neo-radius-button);
+@media (prefers-reduced-transparency: reduce) {
+  [data-ui-theme="windows"] .liquid-glass,
+  [data-ui-theme="windows"] .liquid-glass-elevated,
+  [data-ui-theme="windows"] .liquid-glass-subtle {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(244, 246, 249, .96) !important;
+  }
+  .dark[data-ui-theme="windows"] .liquid-glass,
+  .dark[data-ui-theme="windows"] .liquid-glass-elevated,
+  .dark[data-ui-theme="windows"] .liquid-glass-subtle {
+    background: rgba(35, 38, 46, .96) !important;
+  }
 }
 
-.neo-artwork-radius {
-  border-radius: var(--neo-radius-artwork);
-}
+.neo-card-radius { border-radius: var(--neo-radius-card); }
+.neo-btn-radius { border-radius: var(--neo-radius-button); }
+.neo-artwork-radius { border-radius: var(--neo-radius-artwork); }
 
 @keyframes neo-vinyl-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.animate-vinyl-spin {
-  animation: neo-vinyl-spin 18s linear infinite;
-}
-
+.animate-vinyl-spin { animation: neo-vinyl-spin 18s linear infinite; }
 .animate-vinyl-paused {
   animation: neo-vinyl-spin 18s linear infinite;
   animation-play-state: paused;
 }
 
-.pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
 
-.pt-safe {
-  padding-top: env(safe-area-inset-top, 0px);
-}
-
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgba(128, 128, 140, 0.25);
   border-radius: 9999px;
 }
-
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 140, 0.45);
-}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 140, 0.45); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -276,22 +334,15 @@
   position: absolute;
 }
 
-.gsi-material-button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
+.gsi-material-button:disabled { cursor: default; opacity: 0.55; }
 .gsi-material-button:not(:disabled):hover {
   box-shadow: 0 1px 3px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
 }
-
 .gsi-material-button:not(:disabled):hover .gsi-material-button-state {
   background-color: #303030;
   opacity: 0.08;
 }
-
 .dark .gsi-material-button:not(:disabled):hover .gsi-material-button-state {
   background-color: #ffffff;
   opacity: 0.08;
 }
-
