@@ -1,3 +1,4 @@
+import React from 'react';
 import { AppShell } from './app/AppShell';
 import { DiscoveryProvider } from './app/DiscoveryContext';
 import { LibraryProvider } from './app/LibraryContext';
