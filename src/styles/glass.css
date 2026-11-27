@@ -17,6 +17,9 @@
   --neo-font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
   --neo-font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
   --neo-glass-shadow: 0 12px 36px -12px rgba(17, 18, 22, 0.12), 0 2px 8px -2px rgba(17, 18, 22, 0.05);
+  --neo-m3-primary-container: rgba(211, 227, 253, 0.88);
+  --neo-m3-on-primary-container: #062e6f;
+  --neo-m3-outline-variant: rgba(17, 18, 22, 0.10);
 }
 
 .dark {
@@ -31,6 +34,9 @@
   --neo-glass-border: rgba(255, 255, 255, 0.1);
   --neo-glass-highlight: rgba(255, 255, 255, 0.14);
   --neo-glass-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.65), 0 2px 10px -2px rgba(0, 0, 0, 0.45);
+  --neo-m3-primary-container: rgba(44, 62, 102, 0.88);
+  --neo-m3-on-primary-container: #d3e3fd;
+  --neo-m3-outline-variant: rgba(255, 255, 255, 0.12);
 }
 
 @layer base {
@@ -41,7 +47,7 @@
 
   body {
     background-color: var(--neo-app-bg);
-    transition: background-color 220ms ease;
+    transition: background-color 240ms ease;
   }
 
   h1, h2, h3, h4, .font-display {
@@ -54,50 +60,126 @@
   }
 }
 
+/* Core Optical Glass Surfaces with subtle specular rim refraction */
 .liquid-glass {
-  background: var(--neo-glass-bg);
+  background-color: var(--neo-glass-bg);
+  background-image: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0.04) 45%,
+    transparent 100%
+  );
   backdrop-filter: blur(var(--neo-glass-blur)) saturate(var(--neo-glass-saturate));
   -webkit-backdrop-filter: blur(var(--neo-glass-blur)) saturate(var(--neo-glass-saturate));
   border: 1px solid var(--neo-glass-border);
-  box-shadow: inset 0 1px 0 0 var(--neo-glass-highlight), var(--neo-glass-shadow);
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.03),
+    var(--neo-glass-shadow);
+}
+
+.dark .liquid-glass {
+  background-image: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.015) 45%,
+    transparent 100%
+  );
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.22),
+    var(--neo-glass-shadow);
 }
 
 .liquid-glass-elevated {
-  background: var(--neo-glass-bg-elevated);
+  background-color: var(--neo-glass-bg-elevated);
+  background-image: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.28) 0%,
+    rgba(255, 255, 255, 0.05) 48%,
+    transparent 100%
+  );
   backdrop-filter: blur(calc(var(--neo-glass-blur) + 8px)) saturate(calc(var(--neo-glass-saturate) + 15%));
   -webkit-backdrop-filter: blur(calc(var(--neo-glass-blur) + 8px)) saturate(calc(var(--neo-glass-saturate) + 15%));
   border: 1px solid var(--neo-glass-border);
-  box-shadow: inset 0 1px 0 0 var(--neo-glass-highlight), var(--neo-glass-shadow);
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.04),
+    var(--neo-glass-shadow);
+}
+
+.dark .liquid-glass-elevated {
+  background-image: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.02) 48%,
+    transparent 100%
+  );
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.28),
+    var(--neo-glass-shadow);
 }
 
 .liquid-glass-subtle {
-  background: var(--neo-glass-bg-subtle);
+  background-color: var(--neo-glass-bg-subtle);
+  background-image: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    transparent 65%
+  );
   backdrop-filter: blur(calc(var(--neo-glass-blur) * 0.65)) saturate(var(--neo-glass-saturate));
   -webkit-backdrop-filter: blur(calc(var(--neo-glass-blur) * 0.65)) saturate(var(--neo-glass-saturate));
   border: 1px solid var(--neo-glass-border);
 }
 
-/* Neo remains the original expressive liquid-glass identity. */
+.dark .liquid-glass-subtle {
+  background-image: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    transparent 65%
+  );
+}
+
+/* Neo Player: expressiveness with specular rim luminance */
 [data-ui-theme="neo"] .liquid-glass,
 [data-ui-theme="neo"] .liquid-glass-elevated {
-  box-shadow: inset 0 1px 0 0 var(--neo-glass-highlight), var(--neo-glass-shadow);
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    var(--neo-glass-shadow);
 }
 
 /*
- * Premium Material-inspired minimal surfaces: quiet tonal layers, crisp outlines,
- * no backdrop blur, and restrained elevation. The existing Material palette and
- * page components continue to drive all app behaviour.
+ * Material Design 3 Expressive (Minimal & Glassy):
+ * Translucent tonal dynamic-color glass containers, crisp outline-variant hairlines,
+ * pill-shaped expressive navigation containers, and whisper-soft ambient shadows.
  */
 [data-ui-theme="material"] .liquid-glass,
 [data-ui-theme="material"] .liquid-glass-elevated {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  box-shadow: 0 1px 2px rgba(18, 20, 28, .045), 0 5px 18px -10px rgba(18, 20, 28, .12);
+  background-image: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.24) 0%,
+    color-mix(in srgb, var(--neo-accent) 4%, transparent) 100%
+  );
+  border-color: var(--neo-m3-outline-variant);
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    var(--neo-glass-shadow);
+}
+
+.dark[data-ui-theme="material"] .liquid-glass,
+.dark[data-ui-theme="material"] .liquid-glass-elevated {
+  background-image: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    color-mix(in srgb, var(--neo-accent) 6%, transparent) 100%
+  );
 }
 
 [data-ui-theme="material"] .liquid-glass-subtle {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  background-image: none;
+  border-color: var(--neo-m3-outline-variant);
 }
 
 [data-ui-theme="material"] .neo-nav-item-active {
@@ -105,6 +187,11 @@
   background-color: var(--neo-m3-primary-container) !important;
   color: var(--neo-m3-on-primary-container) !important;
   font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.dark[data-ui-theme="material"] .neo-nav-item-active {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 [data-ui-theme="material"] .neo-mobile-nav-pill {
@@ -115,119 +202,140 @@
 }
 
 [data-ui-theme="material"] .neo-card-radius {
-  border: 1px solid color-mix(in srgb, var(--neo-accent) 8%, transparent);
+  border-color: var(--neo-m3-outline-variant);
+}
+
+.m3-tonal-circle {
+  background-color: rgba(17, 18, 22, 0.08);
+  color: #14151a;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: background-color 180ms ease, transform 160ms ease, color 180ms ease;
+}
+
+.m3-tonal-circle:hover {
+  background-color: rgba(17, 18, 22, 0.14);
+}
+
+.dark .m3-tonal-circle {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.dark .m3-tonal-circle:hover {
+  background-color: rgba(255, 255, 255, 0.22);
 }
 
 /*
- * Windows Fluent-inspired Mica. Mica is a translucent, wallpaper-tinted material,
- * not a solid card with a blur filter disabled. Keep blur on intentional glass
- * surfaces only so the ambient app backdrop can diffuse through them.
+ * Editorial Theme:
+ * Flagship curatorial aesthetic inspired by archival art publications & luxury Hi-Fi hardware.
+ * Warm Alabaster (#FAF8F4) & Obsidian (#0B0B0D) vellum frosted glass, 1px architectural hairlines,
+ * balanced Playfair serif display typography, and zero thick accent bars.
  */
-[data-ui-theme="windows"] body::before {
+[data-ui-theme="editorial"] body::before {
   content: "";
   position: fixed;
-  inset: -10%;
-  z-index: -1;
+  inset: 0;
+  z-index: 1;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse at 18% 12%, color-mix(in srgb, var(--neo-accent) 12%, transparent), transparent 48%),
-    radial-gradient(ellipse at 84% 78%, color-mix(in srgb, var(--neo-secondary) 9%, transparent), transparent 46%),
-    linear-gradient(145deg, #f8f9fb, #e9edf3 58%, #f3f5f8);
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
 }
 
-.dark[data-ui-theme="windows"] body::before {
-  background:
-    radial-gradient(ellipse at 18% 12%, color-mix(in srgb, var(--neo-accent) 17%, transparent), transparent 48%),
-    radial-gradient(ellipse at 84% 78%, color-mix(in srgb, var(--neo-secondary) 13%, transparent), transparent 46%),
-    linear-gradient(145deg, #242832, #1d2027 58%, #292d35);
+[data-ui-theme="editorial"] h1,
+[data-ui-theme="editorial"] h2,
+[data-ui-theme="editorial"] h3,
+[data-ui-theme="editorial"] .font-display {
+  letter-spacing: -0.026em;
+  text-wrap: balance;
 }
 
-[data-ui-theme="windows"] .liquid-glass,
-[data-ui-theme="windows"] .liquid-glass-elevated {
-  background: color-mix(in srgb, rgba(247, 249, 252, .72) 92%, var(--neo-accent) 8%) !important;
-  backdrop-filter: blur(24px) saturate(142%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(142%) !important;
-  border: 1px solid rgba(255, 255, 255, .64);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 8px 26px -18px rgba(20, 30, 48, .34);
+[data-ui-theme="editorial"] .liquid-glass,
+[data-ui-theme="editorial"] .liquid-glass-elevated {
+  background-image: linear-gradient(
+    165deg,
+    rgba(255, 253, 248, 0.34) 0%,
+    rgba(255, 253, 248, 0.04) 52%,
+    transparent 100%
+  );
+  border-color: var(--neo-glass-border);
+  box-shadow:
+    inset 0 1px 0 0 var(--neo-glass-highlight),
+    var(--neo-glass-shadow);
 }
 
-[data-ui-theme="windows"] .liquid-glass-subtle {
-  background: rgba(255, 255, 255, .42) !important;
-  backdrop-filter: blur(18px) saturate(136%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(136%) !important;
-  border: 1px solid rgba(255, 255, 255, .48);
+.dark[data-ui-theme="editorial"] .liquid-glass,
+.dark[data-ui-theme="editorial"] .liquid-glass-elevated {
+  background-image: linear-gradient(
+    165deg,
+    rgba(255, 248, 236, 0.065) 0%,
+    rgba(255, 248, 236, 0.01) 50%,
+    transparent 100%
+  );
 }
 
-.dark[data-ui-theme="windows"] .liquid-glass,
-.dark[data-ui-theme="windows"] .liquid-glass-elevated {
-  background: color-mix(in srgb, rgba(36, 39, 47, .76) 92%, var(--neo-accent) 8%) !important;
-  border-color: rgba(255, 255, 255, .13);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 10px 28px -18px rgba(0, 0, 0, .66);
+[data-ui-theme="editorial"] .liquid-glass-subtle {
+  background-image: none;
+  border-color: var(--neo-glass-border);
 }
 
-.dark[data-ui-theme="windows"] .liquid-glass-subtle {
-  background: rgba(38, 41, 49, .58) !important;
-  border-color: rgba(255, 255, 255, .11);
+[data-ui-theme="editorial"] .neo-nav-item-active {
+  background-color: #161514 !important;
+  color: #faf8f4 !important;
+  border: 1px solid rgba(22, 21, 20, 0.16);
+  box-shadow: 0 6px 18px -10px rgba(17, 16, 15, 0.45);
 }
 
-[data-ui-theme="windows"] .neo-nav-item-active {
-  position: relative;
-  border-radius: 6px;
-  background-color: rgba(20, 34, 52, .07) !important;
-  color: #17202d !important;
+.dark[data-ui-theme="editorial"] .neo-nav-item-active {
+  background-color: #f4efe6 !important;
+  color: #111113 !important;
+  border: 1px solid rgba(255, 248, 235, 0.24);
+  box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.72);
 }
 
-.dark[data-ui-theme="windows"] .neo-nav-item-active {
-  background-color: rgba(255, 255, 255, .09) !important;
-  color: #f5f7fa !important;
-}
-
-[data-ui-theme="windows"] .neo-nav-item-active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 9999px;
-  background-color: var(--neo-accent);
-}
-
-[data-ui-theme="windows"] .neo-mobile-nav-pill {
-  position: relative;
+[data-ui-theme="editorial"] .neo-mobile-nav-pill {
   padding: 4px 14px;
-  border-radius: 6px;
-  background-color: rgba(0, 0, 0, .06);
+  border-radius: 10px;
+  background-color: #161514;
+  color: #faf8f4;
 }
 
-.dark[data-ui-theme="windows"] .neo-mobile-nav-pill {
-  background-color: rgba(255, 255, 255, .09);
+.dark[data-ui-theme="editorial"] .neo-mobile-nav-pill {
+  background-color: #f4efe6;
+  color: #111113;
 }
 
-/* Keep a legible, graceful material fallback when blur is unavailable/disabled. */
+/* Smooth vertical progressive text/lyrics fade mask */
+.progressive-mask-y {
+  mask-image: linear-gradient(180deg, transparent 0%, black 10%, black 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 10%, black 88%, transparent 100%);
+}
+
+/* Graceful fallback when backdrop-filter is unavailable or reduced transparency is requested */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  [data-ui-theme="windows"] .liquid-glass,
-  [data-ui-theme="windows"] .liquid-glass-elevated {
-    background: rgba(242, 245, 249, .96) !important;
+  .liquid-glass,
+  .liquid-glass-elevated {
+    background-color: rgba(248, 247, 244, 0.96) !important;
   }
-  .dark[data-ui-theme="windows"] .liquid-glass,
-  .dark[data-ui-theme="windows"] .liquid-glass-elevated {
-    background: rgba(35, 38, 46, .96) !important;
+  .dark .liquid-glass,
+  .dark .liquid-glass-elevated {
+    background-color: rgba(20, 21, 26, 0.96) !important;
   }
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  [data-ui-theme="windows"] .liquid-glass,
-  [data-ui-theme="windows"] .liquid-glass-elevated,
-  [data-ui-theme="windows"] .liquid-glass-subtle {
+  .liquid-glass,
+  .liquid-glass-elevated,
+  .liquid-glass-subtle {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
-    background: rgba(244, 246, 249, .96) !important;
+    background-color: rgba(247, 246, 243, 0.96) !important;
   }
-  .dark[data-ui-theme="windows"] .liquid-glass,
-  .dark[data-ui-theme="windows"] .liquid-glass-elevated,
-  .dark[data-ui-theme="windows"] .liquid-glass-subtle {
-    background: rgba(35, 38, 46, .96) !important;
+  .dark .liquid-glass,
+  .dark .liquid-glass-elevated,
+  .dark .liquid-glass-subtle {
+    background-color: rgba(20, 21, 26, 0.96) !important;
   }
 }
 

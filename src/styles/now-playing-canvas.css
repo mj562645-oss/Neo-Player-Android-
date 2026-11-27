@@ -1,21 +1,20 @@
 /*
- * Glass Canvas: an artwork-derived ambient motion layer for Now Playing.
- * It intentionally uses CSS-only compositing (no second player, canvas renderer,
- * remote video fetch, or extra image decode) so track changes stay inexpensive.
+ * Immersive Now Playing Shader & Artwork Stage Styles
+ * Pairs with GlassShaderCanvas & ProgressiveBlur for fluid refractive highlights.
  */
 
 [role="dialog"][aria-label="Now Playing"] {
   isolation: isolate;
 }
 
-/* The existing artwork background slowly drifts behind the glass scrim. */
-[role="dialog"][aria-label="Now Playing"] > img[aria-hidden="true"] {
+/* Slowly drifting artwork canvas behind the optical glass scrim */
+[role="dialog"][aria-label="Now Playing"] .neo-np-artwork-bg {
   transform-origin: 50% 46%;
   animation: neo-canvas-drift 28s ease-in-out infinite alternate;
   will-change: transform;
 }
 
-/* Album art gets a restrained optical-glass highlight without obscuring it. */
+/* Album cover surface specular highlight */
 [role="dialog"][aria-label="Now Playing"] .neo-artwork-radius {
   isolation: isolate;
   transform: translateZ(0);
@@ -30,19 +29,29 @@
   pointer-events: none;
   border-radius: inherit;
   background:
-    linear-gradient(145deg, rgba(255,255,255,.22), transparent 28%, transparent 68%, rgba(255,255,255,.08)),
-    radial-gradient(ellipse at 18% 8%, rgba(255,255,255,.18), transparent 42%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 0 0 1px rgba(255,255,255,.1);
-  opacity: .68;
+    linear-gradient(145deg, rgba(255, 255, 255, 0.24), transparent 28%, transparent 70%, rgba(255, 255, 255, 0.08)),
+    radial-gradient(ellipse at 18% 8%, rgba(255, 255, 255, 0.18), transparent 44%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  opacity: 0.72;
   transition: opacity 420ms ease, box-shadow 420ms ease;
 }
 
 [role="dialog"][aria-label="Now Playing"] .neo-artwork-radius:hover::after {
-  opacity: .9;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.34), inset 0 0 0 1px rgba(255,255,255,.16);
+  opacity: 0.94;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
-/* Dark-canvas protection: a soft edge veil keeps dark artwork rich but legible. */
+[data-ui-theme="material"] [role="dialog"][aria-label="Now Playing"] .neo-artwork-radius::after,
+[data-ui-theme="material"] [role="dialog"][aria-label="Now Playing"] .neo-artwork-radius::before {
+  display: none;
+}
+
+.m3-artwork-melt {
+  -webkit-mask-image: linear-gradient(180deg, #000000 0%, #000000 62%, rgba(0, 0, 0, 0.65) 80%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000000 0%, #000000 62%, rgba(0, 0, 0, 0.65) 80%, transparent 100%);
+}
+
+/* Dark-canvas edge veil keeps deep covers luminous */
 .dark [role="dialog"][aria-label="Now Playing"] .neo-artwork-radius::before {
   content: "";
   position: absolute;
@@ -50,53 +59,63 @@
   z-index: 1;
   pointer-events: none;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(4,5,9,.12), transparent 30%, transparent 72%, rgba(4,5,9,.2));
+  background: linear-gradient(180deg, rgba(4, 5, 9, 0.10), transparent 28%, transparent 72%, rgba(4, 5, 9, 0.22));
 }
 
-/* Wordmark-like light sweep beneath the track title; text contrast stays unchanged. */
-[role="dialog"][aria-label="Now Playing"] h2[class*="text-xl"][class*="font-display"] {
+/* Neo-only luminous title accent sweep */
+[data-ui-theme="neo"] [role="dialog"][aria-label="Now Playing"] .neo-np-title {
   position: relative;
   text-shadow: 0 0 22px color-mix(in srgb, var(--neo-accent) 12%, transparent);
 }
 
-[role="dialog"][aria-label="Now Playing"] h2[class*="text-xl"][class*="font-display"]::after {
+[data-ui-theme="neo"] [role="dialog"][aria-label="Now Playing"] .neo-np-title::after {
   content: "";
   display: block;
-  width: min(38%, 5.5rem);
+  width: min(36%, 4.75rem);
   height: 2px;
-  margin-top: .32rem;
+  margin-top: 0.32rem;
   border-radius: 999px;
   background: linear-gradient(90deg, transparent, var(--neo-accent), var(--neo-secondary), transparent);
   background-size: 220% 100%;
-  opacity: .72;
+  opacity: 0.72;
   animation: neo-wordmark-wave 5s ease-in-out infinite;
 }
 
-/* Keep track switches composed and avoid flashing a newly mounted artwork layer. */
+/* Editorial crisp architectural underline rule */
+[data-ui-theme="editorial"] [role="dialog"][aria-label="Now Playing"] .neo-np-title::after {
+  content: "";
+  display: block;
+  width: 2.5rem;
+  height: 1px;
+  margin-top: 0.4rem;
+  background-color: var(--neo-accent);
+  opacity: 0.85;
+}
+
 [role="dialog"][aria-label="Now Playing"] .neo-artwork-radius img {
   backface-visibility: hidden;
   transform: translateZ(0);
 }
 
 @keyframes neo-canvas-drift {
-  0% { transform: scale(1.035) translate3d(-.35%, .15%, 0); }
-  100% { transform: scale(1.085) translate3d(.35%, -.15%, 0); }
+  0% { transform: scale(1.04) translate3d(-0.35%, 0.15%, 0); }
+  100% { transform: scale(1.095) translate3d(0.35%, -0.15%, 0); }
 }
 
 @keyframes neo-wordmark-wave {
-  0%, 100% { background-position: 100% 50%; opacity: .48; }
-  50% { background-position: 0 50%; opacity: .88; }
+  0%, 100% { background-position: 100% 50%; opacity: 0.48; }
+  50% { background-position: 0 50%; opacity: 0.88; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [role="dialog"][aria-label="Now Playing"] > img[aria-hidden="true"],
-  [role="dialog"][aria-label="Now Playing"] h2[class*="text-xl"][class*="font-display"]::after {
+  [role="dialog"][aria-label="Now Playing"] .neo-np-artwork-bg,
+  [data-ui-theme="neo"] [role="dialog"][aria-label="Now Playing"] .neo-np-title::after {
     animation: none !important;
   }
 }
 
 @media (max-width: 640px) {
-  [role="dialog"][aria-label="Now Playing"] > img[aria-hidden="true"] {
+  [role="dialog"][aria-label="Now Playing"] .neo-np-artwork-bg {
     animation-duration: 36s;
   }
 }

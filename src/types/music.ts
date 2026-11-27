@@ -125,7 +125,7 @@ export interface LyricsDocument {
   updatedAt: number;
 }
 
-export type UiThemeId = 'neo' | 'material' | 'windows';
+export type UiThemeId = 'neo' | 'material' | 'editorial';
 
 export interface AppPalette {
   id: string;

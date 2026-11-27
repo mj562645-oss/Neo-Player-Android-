@@ -11,6 +11,7 @@ import {
 import { usePlayer } from '../app/PlayerContext';
 import { useTheme } from '../app/ThemeContext';
 import { useDominantColor } from '../hooks/useDominantColor';
+import { normalizeUiThemeId } from '../lib/palettes';
 import { cn } from '../lib/utils';
 import { AlbumArtwork } from './AlbumArtwork';
 
@@ -35,7 +36,7 @@ export const MiniPlayer: React.FC = () => {
 
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
   const isLivePill = settings.personalization.liveMediaPill ?? true;
-  const uiTheme = settings.personalization.uiTheme || 'neo';
+  const uiTheme = normalizeUiThemeId(settings.personalization.uiTheme);
 
   const repeatLabel =
     repeat === 'one'
@@ -54,7 +55,7 @@ export const MiniPlayer: React.FC = () => {
         className={cn(
           'pointer-events-auto relative overflow-hidden max-w-4xl mx-auto liquid-glass-elevated transition-all duration-300',
           isLivePill
-            ? uiTheme === 'windows'
+            ? uiTheme === 'editorial'
               ? 'rounded-[14px]'
               : 'rounded-full'
             : 'neo-card-radius'
@@ -183,7 +184,7 @@ export const MiniPlayer: React.FC = () => {
         <div
           className={cn(
             'relative z-10 h-[2px] w-full bg-black/8 dark:bg-white/12',
-            isLivePill && uiTheme !== 'windows' && 'mx-4 w-[calc(100%-2rem)]'
+            isLivePill && uiTheme !== 'editorial' && 'mx-4 w-[calc(100%-2rem)]'
           )}
         >
           <div

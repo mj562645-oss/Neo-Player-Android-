@@ -23,6 +23,7 @@ import {
   getFontPresetMeta,
   getPalettesForTheme,
   getUiThemeMeta,
+  normalizeUiThemeId,
   resolveActivePalette,
   STUDIO_GRADIENTS,
   UI_THEMES,
@@ -60,7 +61,7 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
   const { showToast } = useToast();
 
   const p = settings.personalization;
-  const activeUiTheme = p.uiTheme || 'neo';
+  const activeUiTheme = normalizeUiThemeId(p.uiTheme);
   const activeThemeMeta = getUiThemeMeta(activeUiTheme);
   const activeFontMeta = getFontPresetMeta(p.fontStyle);
   const activePalette = resolveActivePalette(p);
@@ -291,12 +292,12 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
         </div>
       </div>
 
-      {/* Section 0: UI Design Theme (Neo Player, Material UI, Windows) */}
+      {/* Section 0: UI Design Theme (Neo Player, Material 3, Editorial) */}
       <div className="space-y-3">
         <div>
           <p className="text-sm font-semibold">App Design Theme</p>
           <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
-            Switch seamlessly between Neo Glass, Google Material Design 3, and Windows 11 Fluent
+            Switch seamlessly between Neo Liquid Glass, Material 3 Expressive, and Editorial
           </p>
         </div>
 
@@ -306,14 +307,14 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
             const themePalettes = getPalettesForTheme(theme.id);
             const sigPalette = themePalettes[0];
             const cardRadius =
-              theme.id === 'windows'
-                ? '8px'
+              theme.id === 'editorial'
+                ? '14px'
                 : theme.id === 'material'
-                  ? '22px'
+                  ? '24px'
                   : '20px';
             const btnRadius =
-              theme.id === 'windows'
-                ? '5px'
+              theme.id === 'editorial'
+                ? '8px'
                 : theme.id === 'material'
                   ? '9999px'
                   : '12px';
@@ -341,13 +342,17 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className="w-7 h-7 flex items-center justify-center text-white text-[10px] font-bold shrink-0"
+                      className="w-7 h-7 flex items-center justify-center text-white text-[11px] font-bold shrink-0"
                       style={{
                         borderRadius: btnRadius,
                         backgroundColor: sigPalette?.accent || '#FF2D55',
+                        fontFamily:
+                          theme.id === 'editorial'
+                            ? "'Playfair Display', Georgia, serif"
+                            : undefined,
                       }}
                     >
-                      ♪
+                      {theme.id === 'editorial' ? 'Aa' : '♪'}
                     </span>
                     <div className="space-y-1">
                       <span className="block w-12 h-2 rounded-full bg-[#111216]/25 dark:bg-white/30" />
@@ -367,7 +372,19 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-bold font-display truncate">{theme.name}</p>
+                    <p
+                      className={cn(
+                        'text-sm font-bold font-display truncate',
+                        theme.id === 'editorial' && 'italic'
+                      )}
+                      style={
+                        theme.id === 'editorial'
+                          ? { fontFamily: "'Playfair Display', Georgia, serif" }
+                          : undefined
+                      }
+                    >
+                      {theme.name}
+                    </p>
                     <p className="text-[11px] text-[#6E6E73] dark:text-[#98989D] truncate">
                       {theme.tagline}
                     </p>
@@ -393,7 +410,7 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
             </p>
             <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
               {showAllThemePalettes
-                ? 'Showing palettes across Neo Player, Material UI, and Windows'
+                ? 'Showing palettes across Neo Player, Material 3, and Editorial'
                 : `Curated accent & surface palettes tailored for ${activeThemeMeta.name}`}
             </p>
           </div>
@@ -710,62 +727,52 @@ export const PersonalizationStudio: React.FC<{ onBack?: () => void }> = ({
       </div>
 
       {/* Section 3: Surfaces, Corners, Font & Vinyl Style */}
-      <div
-        className={cn(
-          'grid grid-cols-1 gap-5 pt-3 border-t border-black/8 dark:border-white/10',
-          activeUiTheme === 'neo' && 'sm:grid-cols-2'
-        )}
-      >
-        {activeUiTheme === 'neo' ? (
-          <div className="space-y-2.5">
-            <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Glass Surface Material</span>
-            </p>
-            <div className="grid grid-cols-4 gap-1.5">
-              {(['frosted', 'clear', 'tinted', 'solid'] as GlassStylePreset[]).map((style) => (
-                <button
-                  key={style}
-                  type="button"
-                  onClick={() => void updatePersonalization({ glassStyle: style })}
-                  className={cn(
-                    'min-h-[38px] rounded-xl text-xs font-medium capitalize cursor-pointer transition-colors',
-                    p.glassStyle === style
-                      ? 'text-white'
-                      : 'liquid-glass-subtle text-[#48484A] dark:text-[#AEAEB2]'
-                  )}
-                  style={
-                    p.glassStyle === style
-                      ? { backgroundColor: 'var(--neo-accent)' }
-                      : undefined
-                  }
-                >
-                  {style}
-                </button>
-              ))}
-            </div>
-            {p.glassStyle !== 'solid' && (
-              <div className="pt-1">
-                <div className="flex justify-between text-xs font-medium mb-0.5">
-                  <span>Glass Blur</span>
-                  <span className="font-mono-tabular">{p.glassBlur}px</span>
-                </div>
-                <Slider
-                  min={12}
-                  max={42}
-                  step={2}
-                  value={[p.glassBlur]}
-                  onValueChange={(v) => void updatePersonalization({ glassBlur: v[0] ?? 28 })}
-                />
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-xs text-[#6E6E73] dark:text-[#98989D]">
-            {activeThemeMeta.name} uses opaque, blur-free surfaces for a clean look and smoother
-            rendering.
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-3 border-t border-black/8 dark:border-white/10">
+        <div className="space-y-2.5">
+          <p className="text-xs font-semibold text-[#6E6E73] dark:text-[#98989D] flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Glass Surface Material &amp; Shaders</span>
           </p>
-        )}
+          <div className="grid grid-cols-4 gap-1.5">
+            {(['frosted', 'clear', 'tinted', 'solid'] as GlassStylePreset[]).map((style) => (
+              <button
+                key={style}
+                type="button"
+                onClick={() => void updatePersonalization({ glassStyle: style })}
+                className={cn(
+                  'min-h-[38px] rounded-xl text-xs font-medium capitalize cursor-pointer transition-colors',
+                  p.glassStyle === style
+                    ? 'text-white'
+                    : 'liquid-glass-subtle text-[#48484A] dark:text-[#AEAEB2]'
+                )}
+                style={
+                  p.glassStyle === style
+                    ? { backgroundColor: 'var(--neo-accent)' }
+                    : undefined
+                }
+              >
+                {style}
+              </button>
+            ))}
+          </div>
+          {p.glassStyle !== 'solid' && (
+            <div className="pt-1">
+              <div className="flex justify-between text-xs font-medium mb-0.5">
+                <span>
+                  {activeUiTheme === 'material' ? 'Glass Blur' : 'Glass & Progressive Blur'}
+                </span>
+                <span className="font-mono-tabular">{p.glassBlur}px</span>
+              </div>
+              <Slider
+                min={12}
+                max={42}
+                step={2}
+                value={[p.glassBlur]}
+                onValueChange={(v) => void updatePersonalization({ glassBlur: v[0] ?? 28 })}
+              />
+            </div>
+          )}
+        </div>
 
         <div className="space-y-3">
           <div className="space-y-2">

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ArrowDown,
   AudioLines,
   Check,
   ChevronDown,
@@ -13,9 +14,15 @@ import {
   ListEnd,
   ListMusic,
   ListPlus,
+  MessageSquareQuote,
   MoreHorizontal,
+  MoreVertical,
+  Plus,
   Quote,
+  Repeat,
+  Repeat1,
   Share2,
+  Shuffle,
   SlidersHorizontal,
   Sparkles,
   UserCheck,
@@ -31,6 +38,7 @@ import { useTheme } from '../../app/ThemeContext';
 import { useToast } from '../../app/ToastContext';
 import { useArtworkUrl, useDominantColor } from '../../hooks/useDominantColor';
 import { formatTime } from '../../lib/format';
+import { normalizeUiThemeId, resolveActivePalette } from '../../lib/palettes';
 import { cn } from '../../lib/utils';
 import { AlbumArtwork } from '../../components/AlbumArtwork';
 import { EqualizerPanel } from '../../components/EqualizerPanel';
@@ -38,6 +46,8 @@ import { LyricsViewer } from '../../components/LyricsViewer';
 import { PlaybackControls } from '../../components/PlaybackControls';
 import { ProgressSlider } from '../../components/ProgressSlider';
 import { GlassModal } from '../../components/glass/GlassModal';
+import { GlassShaderCanvas } from '../../components/glass/GlassShaderCanvas';
+import { ProgressiveBlur } from '../../components/glass/ProgressiveBlur';
 import { Slider } from '../../components/ui/slider';
 import { Switch } from '../../components/ui/switch';
 import { TrackMetadataModal } from '../library/TrackMetadataModal';
@@ -86,6 +96,8 @@ export const NowPlayingScreen: React.FC = () => {
   const artworkUrl = useArtworkUrl(currentTrack?.artworkId) || currentTrack?.artworkUrl || null;
   const bgArtworkUrl = artworkUrl || dominantArtUrl || null;
   const p = settings.personalization;
+  const uiTheme = normalizeUiThemeId(p.uiTheme);
+  const activePalette = resolveActivePalette(p);
   const showArtworkBg = p.nowPlayingArtworkBackground ?? true;
   const isYtLetterbox = Boolean(
     bgArtworkUrl && /ytimg\.com\/vi\/[^/]+\/(hqdefault|sddefault|default)\.jpg/i.test(bgArtworkUrl)
@@ -103,6 +115,7 @@ export const NowPlayingScreen: React.FC = () => {
   const isLocalTrack = currentTrack.source !== 'youtube';
   const followed = isArtistFollowed(currentTrack.artist);
   const hasActiveExtras = sleepTimerMode !== 'off' || settings.playbackRate !== 1;
+  const isLossless = /^(flac|alac|wav|aiff|dsd|pcm)$/i.test(currentTrack.format || '');
 
   const sleepStatusLabel =
     sleepTimerMode === 'end_of_track'
@@ -186,7 +199,18 @@ export const NowPlayingScreen: React.FC = () => {
           aria-label="Now Playing"
           className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-[var(--neo-app-bg)] text-[#111216] dark:text-[#F5F5F7]"
         >
-          {/* Full-Bleed Album Art Background harmonized with System Light/Dark & Active Design Theme */}
+          {/* GPU Glassmorphic Fluid Shader Stage */}
+          <GlassShaderCanvas
+            primaryColor={showArtworkBg ? palette.primary : activePalette.accent}
+            secondaryColor={showArtworkBg ? palette.secondary : activePalette.secondary}
+            isDark={resolvedTheme === 'dark'}
+            variant={uiTheme}
+            intensity={showArtworkBg ? 1.15 : 0.85}
+            paused={settings.reducedMotion}
+            className="absolute inset-0 w-full h-full"
+          />
+
+          {/* Full-Bleed Drifting Album Art Layer */}
           {showArtworkBg && bgArtworkUrl && (
             <AnimatePresence mode="sync">
               <motion.img
@@ -199,59 +223,42 @@ export const NowPlayingScreen: React.FC = () => {
                 animate={{
                   opacity:
                     resolvedTheme === 'dark'
-                      ? p.uiTheme === 'windows'
+                      ? uiTheme === 'editorial'
                         ? showLyrics
-                          ? 0.42
-                          : 0.56
-                        : p.uiTheme === 'material'
+                          ? 0.36
+                          : 0.48
+                        : uiTheme === 'material'
                           ? showLyrics
-                            ? 0.48
-                            : 0.64
+                            ? 0.54
+                            : 0.72
                           : p.glassStyle === 'solid'
-                            ? 0.34
+                            ? 0.28
                             : showLyrics
-                              ? 0.58
-                              : 0.84
-                      : p.uiTheme === 'windows'
+                              ? 0.52
+                              : 0.76
+                      : uiTheme === 'editorial'
                         ? showLyrics
-                          ? 0.30
-                          : 0.44
-                        : p.uiTheme === 'material'
+                          ? 0.24
+                          : 0.36
+                        : uiTheme === 'material'
                           ? showLyrics
-                            ? 0.36
-                            : 0.52
+                            ? 0.38
+                            : 0.54
                           : p.glassStyle === 'solid'
-                            ? 0.30
+                            ? 0.24
                             : showLyrics
-                              ? 0.50
-                              : 0.72,
+                              ? 0.44
+                              : 0.64,
                 }}
                 exit={settings.reducedMotion ? { opacity: 0 } : { opacity: 0 }}
                 transition={{ duration: 0.55, ease: 'easeOut' }}
                 className={cn(
-                  'pointer-events-none absolute inset-0 w-full h-full object-cover object-center',
+                  'neo-np-artwork-bg pointer-events-none absolute inset-0 w-full h-full object-cover object-center',
                   isYtLetterbox ? 'scale-[1.36]' : 'scale-110'
                 )}
               />
             </AnimatePresence>
           )}
-
-          {/* Dynamic Color Ambient Wash (adapts to system Light/Dark & Design Theme) */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 transition-all duration-700"
-            style={{
-              background:
-                showArtworkBg && bgArtworkUrl
-                  ? p.uiTheme === 'material'
-                    ? `radial-gradient(circle at 20% 18%, ${palette.primary}, transparent 62%), radial-gradient(circle at 80% 82%, var(--neo-accent-soft), transparent 64%)`
-                    : p.uiTheme === 'windows'
-                      ? `radial-gradient(circle at 18% 20%, ${palette.primary}, transparent 56%), radial-gradient(circle at 82% 78%, var(--neo-secondary-soft), transparent 60%)`
-                      : `radial-gradient(circle at 22% 20%, ${palette.primary}, transparent 58%), radial-gradient(circle at 78% 78%, ${palette.secondary}, transparent 62%)`
-                  : `radial-gradient(circle at 20% 20%, var(--neo-accent-soft), transparent 60%), radial-gradient(circle at 80% 80%, var(--neo-secondary-soft), transparent 62%)`,
-              opacity: showArtworkBg ? 1 : 0.72,
-            }}
-          />
 
           {/* Theme-Specific Diffusion & System Light/Dark Scrim */}
           <div
@@ -264,20 +271,22 @@ export const NowPlayingScreen: React.FC = () => {
               if (!showArtworkBg) {
                 return {
                   backgroundColor: isDark
-                    ? p.uiTheme === 'windows'
-                      ? 'rgba(32, 32, 32, 0.92)'
-                      : 'rgba(12, 13, 18, 0.88)'
-                    : p.uiTheme === 'windows'
-                      ? 'rgba(243, 243, 243, 0.92)'
-                      : 'rgba(247, 247, 250, 0.90)',
+                    ? uiTheme === 'editorial'
+                      ? 'rgba(11, 11, 14, 0.58)'
+                      : 'rgba(12, 13, 18, 0.56)'
+                    : uiTheme === 'editorial'
+                      ? 'rgba(250, 248, 244, 0.66)'
+                      : 'rgba(247, 247, 250, 0.64)',
+                  backdropFilter: `blur(${Math.round(baseBlur * 0.7)}px) saturate(145%)`,
+                  WebkitBackdropFilter: `blur(${Math.round(baseBlur * 0.7)}px) saturate(145%)`,
                 };
               }
 
               const backdropBlur =
-                p.uiTheme === 'windows'
-                  ? 44
-                  : p.uiTheme === 'material'
-                    ? 34
+                uiTheme === 'editorial'
+                  ? 42
+                  : uiTheme === 'material'
+                    ? 54
                     : p.glassStyle === 'solid'
                       ? 16
                       : p.glassStyle === 'clear'
@@ -285,64 +294,61 @@ export const NowPlayingScreen: React.FC = () => {
                         : Math.round(baseBlur * 0.95);
 
               const saturate =
-                p.uiTheme === 'windows'
-                  ? '135%'
-                  : p.uiTheme === 'material'
-                    ? '145%'
+                uiTheme === 'editorial'
+                  ? '138%'
+                  : uiTheme === 'material'
+                    ? '165%'
                     : '180%';
 
               let bgOverlay: string;
-              if (p.uiTheme === 'windows') {
-                // Windows 11 Acrylic / Mica tint harmonized to Light (#F3F3F3) or Dark (#202020)
+              if (uiTheme === 'editorial') {
                 bgOverlay = isDark
                   ? showLyrics
-                    ? 'rgba(32, 32, 32, 0.68)'
-                    : 'rgba(32, 32, 32, 0.52)'
+                    ? 'rgba(11, 11, 13, 0.66)'
+                    : 'rgba(11, 11, 13, 0.48)'
                   : showLyrics
-                    ? 'rgba(243, 243, 243, 0.72)'
-                    : 'rgba(243, 243, 243, 0.58)';
-              } else if (p.uiTheme === 'material') {
-                // Google Material Design 3 dynamic color scrim harmonized to Light/Dark tonal surface
+                    ? 'rgba(250, 248, 244, 0.74)'
+                    : 'rgba(250, 248, 244, 0.58)';
+              } else if (uiTheme === 'material') {
                 bgOverlay = isDark
                   ? showLyrics
-                    ? 'rgba(19, 19, 24, 0.64)'
-                    : 'rgba(19, 19, 24, 0.46)'
+                    ? 'rgba(15, 16, 21, 0.54)'
+                    : 'rgba(15, 14, 18, 0.34)'
                   : showLyrics
-                    ? 'rgba(248, 249, 253, 0.70)'
-                    : 'rgba(248, 249, 253, 0.54)';
+                    ? 'rgba(246, 248, 253, 0.62)'
+                    : 'rgba(246, 248, 253, 0.44)';
               } else if (p.glassStyle === 'clear') {
                 bgOverlay = isDark
                   ? showLyrics
-                    ? 'rgba(9, 10, 14, 0.54)'
-                    : 'rgba(9, 10, 14, 0.34)'
+                    ? 'rgba(9, 10, 14, 0.52)'
+                    : 'rgba(9, 10, 14, 0.30)'
                   : showLyrics
-                    ? 'rgba(248, 248, 252, 0.62)'
-                    : 'rgba(248, 248, 252, 0.42)';
+                    ? 'rgba(248, 248, 252, 0.58)'
+                    : 'rgba(248, 248, 252, 0.38)';
               } else if (p.glassStyle === 'tinted') {
                 bgOverlay = isDark
                   ? showLyrics
-                    ? 'rgba(12, 13, 20, 0.62)'
-                    : 'rgba(12, 13, 20, 0.44)'
+                    ? 'rgba(12, 13, 20, 0.60)'
+                    : 'rgba(12, 13, 20, 0.42)'
                   : showLyrics
-                    ? 'rgba(246, 245, 252, 0.68)'
-                    : 'rgba(246, 245, 252, 0.52)';
+                    ? 'rgba(246, 245, 252, 0.66)'
+                    : 'rgba(246, 245, 252, 0.48)';
               } else if (p.glassStyle === 'solid') {
                 bgOverlay = isDark
                   ? showLyrics
-                    ? 'rgba(10, 11, 15, 0.84)'
-                    : 'rgba(10, 11, 15, 0.76)'
+                    ? 'rgba(10, 11, 15, 0.82)'
+                    : 'rgba(10, 11, 15, 0.72)'
                   : showLyrics
-                    ? 'rgba(247, 247, 250, 0.86)'
-                    : 'rgba(247, 247, 250, 0.78)';
+                    ? 'rgba(247, 247, 250, 0.84)'
+                    : 'rgba(247, 247, 250, 0.74)';
               } else {
-                // frosted
                 bgOverlay = isDark
                   ? showLyrics
-                    ? 'rgba(9, 10, 14, 0.58)'
-                    : 'rgba(9, 10, 14, 0.42)'
+                    ? 'rgba(9, 10, 14, 0.56)'
+                    : 'rgba(9, 10, 14, 0.38)'
                   : showLyrics
-                    ? 'rgba(248, 249, 252, 0.66)'
-                    : 'rgba(248, 249, 252, 0.50)';
+                    ? 'rgba(248, 249, 252, 0.64)'
+                    : 'rgba(248, 249, 252, 0.46)';
               }
 
               return {
@@ -360,28 +366,57 @@ export const NowPlayingScreen: React.FC = () => {
             style={{
               background:
                 resolvedTheme === 'dark'
-                  ? 'linear-gradient(180deg, rgba(8,9,13,0.34) 0%, rgba(8,9,13,0.10) 38%, rgba(8,9,13,0.58) 100%)'
-                  : 'linear-gradient(180deg, rgba(248,249,253,0.44) 0%, rgba(248,249,253,0.16) 38%, rgba(248,249,253,0.68) 100%)',
+                  ? 'linear-gradient(180deg, rgba(8,9,13,0.34) 0%, rgba(8,9,13,0.08) 38%, rgba(8,9,13,0.62) 100%)'
+                  : 'linear-gradient(180deg, rgba(248,249,253,0.44) 0%, rgba(248,249,253,0.14) 38%, rgba(248,249,253,0.70) 100%)',
             }}
           />
 
+          {/* Top & Bottom Progressive Blur Curtains inside Now Playing Stage (disabled for Material 3) */}
+          {uiTheme !== 'material' && (
+            <>
+              <ProgressiveBlur position="top" className="absolute left-0 right-0 top-0 h-24 z-[4]" maxBlurPx={18} />
+              <ProgressiveBlur position="bottom" className="absolute left-0 right-0 bottom-0 h-32 z-[4]" maxBlurPx={22} />
+            </>
+          )}
+
           {/* Top Bar */}
-          <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 pt-4 sm:pt-6 pb-2 pt-safe shrink-0">
+          <header className="relative z-10 flex items-center justify-between px-5 sm:px-8 pt-4 sm:pt-6 pb-2 pt-safe shrink-0">
             <button
               type="button"
               onClick={() => setNowPlayingOpen(false)}
               aria-label="Minimize Now Playing"
               className={cn(
-                'min-h-[44px] min-w-[44px] liquid-glass-subtle flex items-center justify-center hover:brightness-105 transition-colors cursor-pointer',
-                p.uiTheme === 'windows' ? 'neo-btn-radius' : 'rounded-full'
+                'min-h-[44px] min-w-[44px] flex items-center justify-center transition-all cursor-pointer',
+                uiTheme === 'material'
+                  ? 'rounded-full m3-tonal-circle'
+                  : cn(
+                      'liquid-glass-subtle hover:brightness-105',
+                      uiTheme === 'editorial' ? 'neo-btn-radius' : 'rounded-full'
+                    )
               )}
             >
-              <ChevronDown className="w-5 h-5" />
+              {uiTheme === 'material' ? (
+                <ArrowDown className="w-5 h-5" />
+              ) : (
+                <ChevronDown className="w-5 h-5" />
+              )}
             </button>
 
             <div className="text-center min-w-0 px-4">
-              <p className="text-xs font-semibold text-[#3A3A40] dark:text-[#D1D1D6] truncate">
-                {showLyrics ? 'Lyrics Overlay' : currentTrack.album}
+              <p
+                className={cn(
+                  'text-xs font-semibold truncate',
+                  uiTheme === 'material'
+                    ? 'text-[#24242A] dark:text-white/90 text-[13px] font-medium tracking-wide'
+                    : 'text-[#3A3A40] dark:text-[#D1D1D6]',
+                  uiTheme === 'editorial' && 'font-display italic text-sm tracking-tight'
+                )}
+              >
+                {showLyrics
+                  ? 'Synchronized Lyrics'
+                  : uiTheme === 'material'
+                    ? 'Now Playing'
+                    : currentTrack.album}
               </p>
               {sleepStatusLabel && (
                 <p className="text-[11px] font-mono-tabular text-[var(--neo-accent)] truncate mt-0.5">
@@ -390,21 +425,38 @@ export const NowPlayingScreen: React.FC = () => {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => setMoreOpen(true)}
-              aria-label="More playback and track options"
-              className={cn(
-                'min-h-[44px] min-w-[44px] liquid-glass-subtle flex items-center justify-center hover:brightness-105 transition-colors cursor-pointer relative',
-                p.uiTheme === 'windows' ? 'neo-btn-radius' : 'rounded-full',
-                hasActiveExtras && 'text-[var(--neo-accent)]'
-              )}
-            >
-              <MoreHorizontal className="w-5 h-5" />
-            </button>
+            {uiTheme === 'material' ? (
+              <button
+                type="button"
+                onClick={() => void toggleTrackLike(currentTrack)}
+                aria-label={currentTrack.isFavourite ? 'Unlike track' : 'Like track'}
+                className={cn(
+                  'min-h-[44px] min-w-[44px] rounded-full m3-tonal-circle flex items-center justify-center active:scale-90 transition-all cursor-pointer',
+                  currentTrack.isFavourite && 'text-[#FF2D55] dark:text-[#FF375F]'
+                )}
+              >
+                <Heart
+                  className="w-5 h-5"
+                  fill={currentTrack.isFavourite ? 'currentColor' : 'none'}
+                />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-label="More playback and track options"
+                className={cn(
+                  'min-h-[44px] min-w-[44px] liquid-glass-subtle flex items-center justify-center hover:brightness-105 transition-colors cursor-pointer relative',
+                  uiTheme === 'editorial' ? 'neo-btn-radius' : 'rounded-full',
+                  hasActiveExtras && 'text-[var(--neo-accent)]'
+                )}
+              >
+                <MoreHorizontal className="w-5 h-5" />
+              </button>
+            )}
           </header>
 
-          {/* Main Stage: Toggle between Classic Player Stage and Full Lyrics Overlay */}
+          {/* Main Stage: Toggle between Immersive Center Stage and Split/Overlay Lyrics Stage */}
           <AnimatePresence mode="wait">
             {showLyrics ? (
               <motion.div
@@ -413,75 +465,164 @@ export const NowPlayingScreen: React.FC = () => {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={settings.reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="relative z-10 flex-1 min-h-0 flex flex-col max-w-3xl w-full mx-auto px-4 sm:px-8 pb-4 sm:pb-6 gap-4"
+                className="relative z-10 flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 lg:items-center max-w-3xl lg:max-w-6xl w-full mx-auto px-4 sm:px-8 pb-4 sm:pb-6 gap-4 lg:gap-10"
               >
-                {/* Compact Track Header inside Lyrics Overlay */}
-                <div className="liquid-glass rounded-2xl p-3 sm:px-4 flex items-center justify-between gap-3 shrink-0">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <AlbumArtwork
-                      artworkId={currentTrack.artworkId}
-                      artworkUrl={currentTrack.artworkUrl}
-                      alt={currentTrack.title}
-                      fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
-                      size="sm"
-                      rounded="xl"
-                    />
-                    <div className="min-w-0">
-                      <h2 className="text-sm sm:text-base font-bold tracking-tight font-display truncate">
-                        {currentTrack.title}
-                      </h2>
-                      <p className="text-xs text-[#6E6E73] dark:text-[#AEAEB2] truncate">
-                        {currentTrack.artist} · {currentTrack.album}
-                      </p>
+                {/* Left / Top Track Column (Mobile compact header + Desktop full hero artwork & controls) */}
+                <div className="lg:col-span-5 flex flex-col justify-center gap-4 lg:gap-5 shrink-0">
+                  {/* Mobile Compact Track Header */}
+                  <div className="lg:hidden liquid-glass neo-card-radius p-3 sm:px-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <AlbumArtwork
+                        artworkId={currentTrack.artworkId}
+                        artworkUrl={currentTrack.artworkUrl}
+                        alt={currentTrack.title}
+                        fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
+                        size="sm"
+                        rounded="xl"
+                      />
+                      <div className="min-w-0">
+                        <h2 className="text-sm sm:text-base font-bold tracking-tight font-display truncate">
+                          {currentTrack.title}
+                        </h2>
+                        <p className="text-xs text-[#6E6E73] dark:text-[#AEAEB2] truncate">
+                          {currentTrack.artist} · {currentTrack.album}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => void toggleTrackLike(currentTrack)}
+                        aria-label={
+                          currentTrack.isFavourite ? 'Remove from favourites' : 'Add to favourites'
+                        }
+                        className={cn(
+                          'min-h-[40px] min-w-[40px] rounded-xl liquid-glass-subtle flex items-center justify-center active:scale-90 transition-all cursor-pointer',
+                          currentTrack.isFavourite
+                            ? 'text-[#FF2D55] dark:text-[#FF375F]'
+                            : 'text-[#6E6E73] dark:text-[#AEAEB2]'
+                        )}
+                      >
+                        <Heart
+                          className="w-4 h-4"
+                          fill={currentTrack.isFavourite ? 'currentColor' : 'none'}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowLyrics(false)}
+                        aria-label="Close lyrics overlay"
+                        className="min-h-[40px] px-3 rounded-xl liquid-glass-subtle flex items-center gap-1.5 text-xs font-medium text-[#111216] dark:text-[#F5F5F7] hover:brightness-105 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => void toggleTrackLike(currentTrack)}
-                      aria-label={
-                        currentTrack.isFavourite ? 'Remove from favourites' : 'Add to favourites'
-                      }
+                  {/* Desktop Immersive Split Artwork & Controls */}
+                  <div className="hidden lg:flex flex-col gap-5 w-full max-w-md mx-auto">
+                    <motion.div
+                      key={`${currentTrack.id}-split`}
+                      animate={{ scale: isPlaying ? 1 : 0.96 }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                       className={cn(
-                        'min-h-[40px] min-w-[40px] rounded-xl liquid-glass-subtle flex items-center justify-center active:scale-90 transition-all cursor-pointer',
-                        currentTrack.isFavourite
-                          ? 'text-[#FF2D55] dark:text-[#FF375F]'
-                          : 'text-[#6E6E73] dark:text-[#AEAEB2]'
+                        'w-[min(26vw,310px)] aspect-square relative overflow-hidden mx-auto',
+                        p.artworkStyle === 'vinyl'
+                          ? 'rounded-full p-4 bg-[#14151A] ring-4 ring-white/15'
+                          : 'neo-artwork-radius'
                       )}
+                      style={{
+                        boxShadow: isPlaying
+                          ? `0 28px 64px -18px ${palette.glow}`
+                          : '0 16px 36px -14px rgba(0,0,0,0.28)',
+                      }}
                     >
-                      <Heart
-                        className="w-4 h-4"
-                        fill={currentTrack.isFavourite ? 'currentColor' : 'none'}
+                      <AlbumArtwork
+                        artworkId={currentTrack.artworkId}
+                        artworkUrl={currentTrack.artworkUrl}
+                        alt={`${currentTrack.title} album art`}
+                        fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
+                        size="fill"
+                        rounded={p.artworkStyle === 'vinyl' ? 'full' : 'theme'}
+                        className={cn(
+                          'w-full h-full',
+                          p.artworkStyle === 'vinyl' &&
+                            !settings.reducedMotion &&
+                            (isPlaying ? 'animate-vinyl-spin' : 'animate-vinyl-paused')
+                        )}
                       />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMoreOpen(true)}
-                      aria-label="More options"
-                      className="min-h-[40px] min-w-[40px] rounded-xl liquid-glass-subtle flex items-center justify-center text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white cursor-pointer"
-                    >
-                      <MoreHorizontal className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowLyrics(false)}
-                      aria-label="Close lyrics overlay"
-                      className="min-h-[40px] px-3 rounded-xl liquid-glass-subtle flex items-center gap-1.5 text-xs font-medium text-[#111216] dark:text-[#F5F5F7] hover:brightness-105 cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                      <span className="hidden sm:inline">Artwork</span>
-                    </button>
+                    </motion.div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="neo-np-title text-2xl font-bold tracking-tight font-display truncate">
+                          {currentTrack.title}
+                        </h2>
+                        <p className="text-sm text-[#3A3A40] dark:text-[#C7C7CC] truncate mt-1">
+                          {currentTrack.artist} · {currentTrack.format}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void toggleTrackLike(currentTrack)}
+                          aria-label={currentTrack.isFavourite ? 'Unlike track' : 'Like track'}
+                          className={cn(
+                            'min-h-[42px] min-w-[42px] rounded-full liquid-glass-subtle flex items-center justify-center transition-all cursor-pointer',
+                            currentTrack.isFavourite
+                              ? 'text-[#FF2D55] dark:text-[#FF375F]'
+                              : 'text-[#6E6E73] dark:text-[#AEAEB2]'
+                          )}
+                        >
+                          <Heart
+                            className="w-4 h-4"
+                            fill={currentTrack.isFavourite ? 'currentColor' : 'none'}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowLyrics(false)}
+                          aria-label="Hide lyrics"
+                          className="min-h-[42px] px-3.5 rounded-full liquid-glass-subtle flex items-center gap-1.5 text-xs font-semibold hover:brightness-105 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Hide Lyrics</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <ProgressSlider
+                      currentTime={currentTime}
+                      duration={duration || currentTrack.duration}
+                      onSeek={seek}
+                      showRemaining={settings.showRemainingTime}
+                      onToggleRemaining={() =>
+                        void updateSettings({ showRemainingTime: !settings.showRemainingTime })
+                      }
+                    />
+
+                    <PlaybackControls
+                      isPlaying={isPlaying}
+                      shuffle={shuffle}
+                      repeat={repeat}
+                      uiTheme={uiTheme}
+                      onTogglePlay={() => void togglePlay()}
+                      onPrev={() => void prevTrack()}
+                      onNext={() => void nextTrack()}
+                      onToggleShuffle={toggleShuffle}
+                      onCycleRepeat={cycleRepeat}
+                    />
                   </div>
                 </div>
 
-                {/* Translucent Synced Lyrics Overlay Stage */}
-                <div className="flex-1 min-h-0 liquid-glass neo-card-radius p-4 sm:p-6 flex flex-col overflow-hidden">
+                {/* Translucent Synced Lyrics Overlay Stage (Single shared instance across Mobile & Desktop) */}
+                <div className="lg:col-span-7 flex-1 min-h-0 h-full lg:max-h-[76vh] liquid-glass neo-card-radius p-4 sm:p-6 flex flex-col overflow-hidden">
                   <LyricsViewer track={currentTrack} compact overlay autoFetchOnEmpty />
                 </div>
 
-                {/* Docked Playback Scrubber & Controls */}
-                <div className="liquid-glass neo-card-radius px-4 py-3 sm:px-6 sm:py-4 space-y-2.5 shrink-0 pb-safe">
+                {/* Mobile Docked Playback Scrubber & Controls */}
+                <div className="lg:hidden liquid-glass neo-card-radius px-4 py-3 sm:px-6 sm:py-4 space-y-2.5 shrink-0 pb-safe">
                   <ProgressSlider
                     currentTime={currentTime}
                     duration={duration || currentTrack.duration}
@@ -512,6 +653,7 @@ export const NowPlayingScreen: React.FC = () => {
                         isPlaying={isPlaying}
                         shuffle={shuffle}
                         repeat={repeat}
+                        uiTheme={uiTheme}
                         onTogglePlay={() => void togglePlay()}
                         onPrev={() => void prevTrack()}
                         onNext={() => void nextTrack()}
@@ -538,206 +680,362 @@ export const NowPlayingScreen: React.FC = () => {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={settings.reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="relative z-10 flex-1 overflow-y-auto px-5 sm:px-10 py-4 flex items-center justify-center"
+                className="relative z-10 flex-1 overflow-y-auto px-6 sm:px-10 py-3 sm:py-4 flex items-center justify-center"
               >
-                <div className="w-full max-w-md lg:max-w-lg mx-auto flex flex-col items-center gap-6">
-                  <motion.div
-                    key={currentTrack.id}
-                    initial={settings.reducedMotion ? false : { scale: 0.96, opacity: 0.85 }}
-                    animate={{
-                      scale: isPlaying ? 1 : 0.95,
-                      opacity: 1,
-                    }}
-                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                    className={cn(
-                      'w-[min(78vw,340px)] sm:w-[360px] md:w-[380px] aspect-square relative overflow-hidden shrink-0',
-                      p.artworkStyle === 'vinyl'
-                        ? 'rounded-full p-5 bg-[#14151A] ring-4 ring-white/15'
-                        : 'neo-artwork-radius'
-                    )}
-                    style={{
-                      boxShadow: isPlaying
-                        ? `0 28px 64px -16px ${palette.glow}`
-                        : '0 16px 36px -14px rgba(0,0,0,0.28)',
-                    }}
-                  >
-                    {p.artworkStyle === 'vinyl' ? (
-                      <div
-                        className={cn(
-                          'w-full h-full rounded-full overflow-hidden relative ring-2 ring-white/15',
-                          !settings.reducedMotion &&
-                            (isPlaying ? 'animate-vinyl-spin' : 'animate-vinyl-paused')
-                        )}
-                      >
+                {uiTheme === 'material' ? (
+                  <div className="w-full max-w-md mx-auto flex flex-col items-center gap-5">
+                    {/* Material UI Signature Feathered Bottom Artwork */}
+                    <motion.div
+                      key={currentTrack.id}
+                      initial={settings.reducedMotion ? false : { scale: 0.96, opacity: 0.85 }}
+                      animate={{
+                        scale: isPlaying ? 1 : 0.95,
+                        opacity: 1,
+                      }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      className={cn(
+                        'w-[min(84vw,375px)] sm:w-[390px] aspect-square relative overflow-hidden shrink-0',
+                        p.artworkStyle === 'vinyl'
+                          ? 'rounded-full p-5 bg-[#14151A] ring-4 ring-white/15'
+                          : 'rounded-[28px] m3-artwork-melt'
+                      )}
+                    >
+                      {p.artworkStyle === 'vinyl' ? (
+                        <div
+                          className={cn(
+                            'w-full h-full rounded-full overflow-hidden relative ring-2 ring-white/15',
+                            !settings.reducedMotion &&
+                              (isPlaying ? 'animate-vinyl-spin' : 'animate-vinyl-paused')
+                          )}
+                        >
+                          <AlbumArtwork
+                            artworkId={currentTrack.artworkId}
+                            artworkUrl={currentTrack.artworkUrl}
+                            alt={`${currentTrack.title} vinyl art`}
+                            fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
+                            size="fill"
+                            rounded="full"
+                            className="w-full h-full"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="w-10 h-10 rounded-full bg-[#14151A] ring-2 ring-white/30" />
+                          </div>
+                        </div>
+                      ) : (
                         <AlbumArtwork
                           artworkId={currentTrack.artworkId}
                           artworkUrl={currentTrack.artworkUrl}
-                          alt={`${currentTrack.title} vinyl art`}
+                          alt={`${currentTrack.title} album art`}
                           fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
                           size="fill"
-                          rounded="full"
+                          rounded="theme"
                           className="w-full h-full"
                         />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className="w-10 h-10 rounded-full bg-[#14151A] ring-2 ring-white/30" />
-                        </div>
+                      )}
+                    </motion.div>
+
+                    {/* Title / Artist Left + Tonal Vertical More Right */}
+                    <div className="w-full flex items-center justify-between gap-3 -mt-2">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="text-[22px] sm:text-2xl font-semibold tracking-tight font-display truncate">
+                          {currentTrack.title}
+                        </h2>
+                        <p className="text-sm sm:text-base text-[#3A3A40] dark:text-white/75 truncate mt-0.5">
+                          {currentTrack.artist}
+                        </p>
                       </div>
-                    ) : (
-                      <AlbumArtwork
-                        artworkId={currentTrack.artworkId}
-                        artworkUrl={currentTrack.artworkUrl}
-                        alt={`${currentTrack.title} album art`}
-                        fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
-                        size="fill"
-                        rounded="theme"
-                        className="w-full h-full"
-                      />
-                    )}
-                  </motion.div>
-
-                  {/* Track Title, Like & More Row */}
-                  <div className="w-full flex items-center justify-between gap-2.5">
-                    <div className="min-w-0 flex-1">
-                      <h2 className="text-xl sm:text-2xl font-bold tracking-tight font-display truncate">
-                        {currentTrack.title}
-                      </h2>
-                      <p className="text-sm sm:text-base text-[#3A3A40] dark:text-[#C7C7CC] truncate mt-0.5">
-                        {currentTrack.artist}
-                        <span aria-hidden="true"> · </span>
-                        <span>{currentTrack.format}</span>
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => void toggleTrackLike(currentTrack)}
-                        aria-label={
-                          currentTrack.isFavourite ? 'Unlike track' : 'Like track'
-                        }
-                        className={cn(
-                          'min-h-[44px] min-w-[44px] rounded-full liquid-glass-subtle flex items-center justify-center active:scale-90 transition-all cursor-pointer',
-                          currentTrack.isFavourite
-                            ? 'text-[#FF2D55] dark:text-[#FF375F]'
-                            : 'text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white'
-                        )}
-                      >
-                        <Heart
-                          className="w-5 h-5"
-                          fill={currentTrack.isFavourite ? 'currentColor' : 'none'}
-                        />
-                      </button>
 
                       <button
                         type="button"
                         onClick={() => setMoreOpen(true)}
                         aria-label="More options"
-                        className="min-h-[44px] min-w-[44px] rounded-full liquid-glass-subtle flex items-center justify-center text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white active:scale-95 transition-all cursor-pointer"
+                        className={cn(
+                          'min-h-[42px] min-w-[42px] rounded-full m3-tonal-circle flex items-center justify-center active:scale-95 cursor-pointer shrink-0',
+                          hasActiveExtras && 'text-[var(--neo-accent)]'
+                        )}
                       >
-                        <MoreHorizontal className="w-5 h-5" />
+                        <MoreVertical className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
 
-                  {/* Scrubber */}
-                  <ProgressSlider
-                    currentTime={currentTime}
-                    duration={duration || currentTrack.duration}
-                    onSeek={seek}
-                    showRemaining={settings.showRemainingTime}
-                    onToggleRemaining={() =>
-                      void updateSettings({ showRemainingTime: !settings.showRemainingTime })
-                    }
-                  />
+                    {/* Minimal Scrubber with Centered Format / Lossless Badge */}
+                    <ProgressSlider
+                      minimal
+                      currentTime={currentTime}
+                      duration={duration || currentTrack.duration}
+                      onSeek={seek}
+                      showRemaining={settings.showRemainingTime}
+                      onToggleRemaining={() =>
+                        void updateSettings({ showRemainingTime: !settings.showRemainingTime })
+                      }
+                      centerLabel={
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#3A3A40] dark:text-white/70">
+                          <AudioLines className="w-3.5 h-3.5 opacity-80" />
+                          <span>{isLossless ? 'Lossless' : currentTrack.format}</span>
+                        </span>
+                      }
+                    />
 
-                  {/* Transport Controls */}
-                  <PlaybackControls
-                    isPlaying={isPlaying}
-                    shuffle={shuffle}
-                    repeat={repeat}
-                    onTogglePlay={() => void togglePlay()}
-                    onPrev={() => void prevTrack()}
-                    onNext={() => void nextTrack()}
-                    onToggleShuffle={toggleShuffle}
-                    onCycleRepeat={cycleRepeat}
-                  />
-
-                  {/* Volume & Bottom Utility Row */}
-                  <div className="w-full space-y-4">
-                    <div className="flex items-center gap-3 px-1">
-                      <button
-                        type="button"
-                        onClick={() => void updateSettings({ muted: !settings.muted })}
-                        aria-label={settings.muted ? 'Unmute' : 'Mute'}
-                        className="min-h-[36px] min-w-[36px] flex items-center justify-center text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white cursor-pointer"
-                      >
-                        {settings.muted || settings.volume === 0 ? (
-                          <VolumeX className="w-4 h-4" />
-                        ) : (
-                          <Volume2 className="w-4 h-4" />
-                        )}
-                      </button>
-                      <Slider
-                        aria-label="Volume"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={[settings.muted ? 0 : settings.volume]}
-                        onValueChange={(vals) =>
-                          void updateSettings({ volume: vals[0] ?? 0.85, muted: false })
-                        }
+                    {/* Centered Trio Transport */}
+                    <div className="py-1 w-full">
+                      <PlaybackControls
+                        isPlaying={isPlaying}
+                        shuffle={shuffle}
+                        repeat={repeat}
+                        uiTheme="material"
+                        onTogglePlay={() => void togglePlay()}
+                        onPrev={() => void prevTrack()}
+                        onNext={() => void nextTrack()}
+                        onToggleShuffle={toggleShuffle}
+                        onCycleRepeat={cycleRepeat}
                       />
                     </div>
 
-                    <div className="grid grid-cols-4 gap-2 w-full pb-safe">
+                    {/* Bottom 4 Tonal Circular Action Buttons */}
+                    <div className="flex items-center justify-center gap-5 sm:gap-7 pt-1 pb-safe">
                       <button
                         type="button"
                         onClick={() => setShowLyrics(true)}
-                        className="min-h-[44px] px-2.5 neo-btn-radius liquid-glass-subtle flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-[#111216] dark:text-[#E5E5EA] hover:brightness-105 transition-colors cursor-pointer"
+                        aria-label="Open Lyrics"
+                        className="w-12 h-12 rounded-full m3-tonal-circle flex items-center justify-center active:scale-90 cursor-pointer"
                       >
-                        <Quote className="w-4 h-4 shrink-0" />
-                        <span>Lyrics</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setEqOpen(true)}
-                        className={cn(
-                          'min-h-[44px] px-2.5 neo-btn-radius flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium transition-colors cursor-pointer',
-                          settings.equalizer.enabled
-                            ? 'bg-[var(--neo-accent)] text-white'
-                            : 'liquid-glass-subtle text-[#111216] dark:text-[#E5E5EA] hover:brightness-105'
-                        )}
-                      >
-                        <SlidersHorizontal className="w-4 h-4 shrink-0" />
-                        <span>EQ</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setQueueOpen(true)}
-                        className="min-h-[44px] px-2.5 neo-btn-radius liquid-glass-subtle flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-[#111216] dark:text-[#E5E5EA] hover:brightness-105 transition-colors cursor-pointer"
-                      >
-                        <ListMusic className="w-4 h-4 shrink-0" />
-                        <span>Queue</span>
+                        <MessageSquareQuote className="w-[18px] h-[18px]" />
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setMoreOpen(true)}
+                        aria-label="Add to Playlist & Playback Modes"
+                        className="w-12 h-12 rounded-full m3-tonal-circle flex items-center justify-center active:scale-90 cursor-pointer"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setQueueOpen(true)}
+                        aria-label="Open Queue"
+                        className="w-12 h-12 rounded-full m3-tonal-circle flex items-center justify-center active:scale-90 cursor-pointer"
+                      >
+                        <ListMusic className="w-[18px] h-[18px]" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEqOpen(true)}
+                        aria-label="Open Equalizer"
                         className={cn(
-                          'min-h-[44px] px-2.5 neo-btn-radius flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium transition-colors cursor-pointer',
-                          hasActiveExtras
-                            ? 'bg-[var(--neo-accent)] text-white'
-                            : 'liquid-glass-subtle text-[#111216] dark:text-[#E5E5EA] hover:brightness-105'
+                          'w-12 h-12 rounded-full flex items-center justify-center active:scale-90 transition-all cursor-pointer',
+                          settings.equalizer.enabled
+                            ? 'bg-[var(--neo-accent)] text-white shadow-md'
+                            : 'm3-tonal-circle'
                         )}
                       >
-                        <MoreHorizontal className="w-4 h-4 shrink-0" />
-                        <span>More</span>
+                        <SlidersHorizontal className="w-[18px] h-[18px]" />
                       </button>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="w-full max-w-md lg:max-w-[460px] mx-auto flex flex-col items-center gap-6">
+                    <motion.div
+                      key={currentTrack.id}
+                      initial={settings.reducedMotion ? false : { scale: 0.96, opacity: 0.85 }}
+                      animate={{
+                        scale: isPlaying ? 1 : 0.95,
+                        opacity: 1,
+                      }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      className={cn(
+                        'w-[min(80vw,355px)] sm:w-[375px] md:w-[395px] aspect-square relative overflow-hidden shrink-0',
+                        p.artworkStyle === 'vinyl'
+                          ? 'rounded-full p-5 bg-[#14151A] ring-4 ring-white/15'
+                          : 'neo-artwork-radius'
+                      )}
+                      style={{
+                        boxShadow: isPlaying
+                          ? `0 30px 72px -16px ${palette.glow}`
+                          : '0 16px 36px -14px rgba(0,0,0,0.28)',
+                      }}
+                    >
+                      {p.artworkStyle === 'vinyl' ? (
+                        <div
+                          className={cn(
+                            'w-full h-full rounded-full overflow-hidden relative ring-2 ring-white/15',
+                            !settings.reducedMotion &&
+                              (isPlaying ? 'animate-vinyl-spin' : 'animate-vinyl-paused')
+                          )}
+                        >
+                          <AlbumArtwork
+                            artworkId={currentTrack.artworkId}
+                            artworkUrl={currentTrack.artworkUrl}
+                            alt={`${currentTrack.title} vinyl art`}
+                            fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
+                            size="fill"
+                            rounded="full"
+                            className="w-full h-full"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="w-10 h-10 rounded-full bg-[#14151A] ring-2 ring-white/30" />
+                          </div>
+                        </div>
+                      ) : (
+                        <AlbumArtwork
+                          artworkId={currentTrack.artworkId}
+                          artworkUrl={currentTrack.artworkUrl}
+                          alt={`${currentTrack.title} album art`}
+                          fallbackSeed={`${currentTrack.album}-${currentTrack.artist}`}
+                          size="fill"
+                          rounded="theme"
+                          className="w-full h-full"
+                        />
+                      )}
+                    </motion.div>
+
+                    {/* Track Title, Like & More Row */}
+                    <div className="w-full flex items-center justify-between gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="neo-np-title text-xl sm:text-2xl font-bold tracking-tight font-display truncate">
+                          {currentTrack.title}
+                        </h2>
+                        <p className="text-sm sm:text-base text-[#3A3A40] dark:text-[#C7C7CC] truncate mt-1">
+                          {currentTrack.artist}
+                          <span aria-hidden="true"> · </span>
+                          <span>{currentTrack.format}</span>
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void toggleTrackLike(currentTrack)}
+                          aria-label={
+                            currentTrack.isFavourite ? 'Unlike track' : 'Like track'
+                          }
+                          className={cn(
+                            'min-h-[44px] min-w-[44px] rounded-full liquid-glass-subtle flex items-center justify-center active:scale-90 transition-all cursor-pointer',
+                            currentTrack.isFavourite
+                              ? 'text-[#FF2D55] dark:text-[#FF375F]'
+                              : 'text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white'
+                          )}
+                        >
+                          <Heart
+                            className="w-5 h-5"
+                            fill={currentTrack.isFavourite ? 'currentColor' : 'none'}
+                          />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMoreOpen(true)}
+                          aria-label="More options"
+                          className="min-h-[44px] min-w-[44px] rounded-full liquid-glass-subtle flex items-center justify-center text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white active:scale-95 transition-all cursor-pointer"
+                        >
+                          <MoreHorizontal className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Scrubber */}
+                    <ProgressSlider
+                      currentTime={currentTime}
+                      duration={duration || currentTrack.duration}
+                      onSeek={seek}
+                      showRemaining={settings.showRemainingTime}
+                      onToggleRemaining={() =>
+                        void updateSettings({ showRemainingTime: !settings.showRemainingTime })
+                      }
+                    />
+
+                    {/* Transport Controls */}
+                    <PlaybackControls
+                      isPlaying={isPlaying}
+                      shuffle={shuffle}
+                      repeat={repeat}
+                      uiTheme={uiTheme}
+                      onTogglePlay={() => void togglePlay()}
+                      onPrev={() => void prevTrack()}
+                      onNext={() => void nextTrack()}
+                      onToggleShuffle={toggleShuffle}
+                      onCycleRepeat={cycleRepeat}
+                    />
+
+                    {/* Volume & Bottom Utility Row */}
+                    <div className="w-full space-y-4">
+                      <div className="flex items-center gap-3 px-1">
+                        <button
+                          type="button"
+                          onClick={() => void updateSettings({ muted: !settings.muted })}
+                          aria-label={settings.muted ? 'Unmute' : 'Mute'}
+                          className="min-h-[36px] min-w-[36px] flex items-center justify-center text-[#6E6E73] dark:text-[#AEAEB2] hover:text-[#111216] dark:hover:text-white cursor-pointer"
+                        >
+                          {settings.muted || settings.volume === 0 ? (
+                            <VolumeX className="w-4 h-4" />
+                          ) : (
+                            <Volume2 className="w-4 h-4" />
+                          )}
+                        </button>
+                        <Slider
+                          aria-label="Volume"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={[settings.muted ? 0 : settings.volume]}
+                          onValueChange={(vals) =>
+                            void updateSettings({ volume: vals[0] ?? 0.85, muted: false })
+                          }
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2 w-full pb-safe">
+                        <button
+                          type="button"
+                          onClick={() => setShowLyrics(true)}
+                          className="min-h-[44px] px-2.5 neo-btn-radius liquid-glass-subtle flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-[#111216] dark:text-[#E5E5EA] hover:brightness-105 transition-colors cursor-pointer"
+                        >
+                          <Quote className="w-4 h-4 shrink-0" />
+                          <span>Lyrics</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setEqOpen(true)}
+                          className={cn(
+                            'min-h-[44px] px-2.5 neo-btn-radius flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium transition-colors cursor-pointer',
+                            settings.equalizer.enabled
+                              ? 'bg-[var(--neo-accent)] text-white'
+                              : 'liquid-glass-subtle text-[#111216] dark:text-[#E5E5EA] hover:brightness-105'
+                          )}
+                        >
+                          <SlidersHorizontal className="w-4 h-4 shrink-0" />
+                          <span>EQ</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setQueueOpen(true)}
+                          className="min-h-[44px] px-2.5 neo-btn-radius liquid-glass-subtle flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium text-[#111216] dark:text-[#E5E5EA] hover:brightness-105 transition-colors cursor-pointer"
+                        >
+                          <ListMusic className="w-4 h-4 shrink-0" />
+                          <span>Queue</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMoreOpen(true)}
+                          className={cn(
+                            'min-h-[44px] px-2.5 neo-btn-radius flex items-center justify-center gap-1.5 text-xs sm:text-sm font-medium transition-colors cursor-pointer',
+                            hasActiveExtras
+                              ? 'bg-[var(--neo-accent)] text-white'
+                              : 'liquid-glass-subtle text-[#111216] dark:text-[#E5E5EA] hover:brightness-105'
+                          )}
+                        >
+                          <MoreHorizontal className="w-4 h-4 shrink-0" />
+                          <span>More</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -774,6 +1072,36 @@ export const NowPlayingScreen: React.FC = () => {
 
               {/* Quick Actions */}
               <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={toggleShuffle}
+                  className={cn(
+                    'min-h-[44px] px-3.5 rounded-2xl liquid-glass-subtle flex items-center gap-2.5 text-xs font-semibold transition-colors cursor-pointer',
+                    shuffle && 'text-[var(--neo-accent)]'
+                  )}
+                >
+                  <Shuffle className="w-4 h-4 shrink-0" />
+                  <span>{shuffle ? 'Shuffle: On' : 'Shuffle: Off'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={cycleRepeat}
+                  className={cn(
+                    'min-h-[44px] px-3.5 rounded-2xl liquid-glass-subtle flex items-center gap-2.5 text-xs font-semibold transition-colors cursor-pointer',
+                    repeat !== 'off' && 'text-[var(--neo-accent)]'
+                  )}
+                >
+                  {repeat === 'one' ? (
+                    <Repeat1 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <Repeat className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>
+                    {repeat === 'one' ? 'Repeat: One' : repeat === 'all' ? 'Repeat: All' : 'Repeat: Off'}
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => void toggleTrackLike(currentTrack)}

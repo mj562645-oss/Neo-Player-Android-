@@ -22,13 +22,15 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useArtworkUrl, useDominantColor } from '../hooks/useDominantColor';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { formatRelativeDate } from '../lib/format';
-import { STUDIO_GRADIENTS } from '../lib/palettes';
+import { normalizeUiThemeId, resolveActivePalette, STUDIO_GRADIENTS } from '../lib/palettes';
 import { cn } from '../lib/utils';
 import { registerAndroidBackHandler } from '../services/androidPlatform';
 import type { AppSection, LibrarySubTab } from '../types/music';
 import { GlassButton } from '../components/glass/GlassButton';
 import { GlassModal } from '../components/glass/GlassModal';
 import { GlassNavigation, type NavDestination } from '../components/glass/GlassNavigation';
+import { GlassShaderCanvas } from '../components/glass/GlassShaderCanvas';
+import { ProgressiveBlur } from '../components/glass/ProgressiveBlur';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { QueueDrawer } from '../components/QueueDrawer';
@@ -85,7 +87,7 @@ export const AppShell: React.FC = () => {
     queueOpen,
     setQueueOpen,
   } = usePlayer();
-  const { settings, settingsLoaded, updateSettings } = useTheme();
+  const { settings, resolvedTheme, settingsLoaded, updateSettings } = useTheme();
   const isOnline = useOnlineStatus();
 
   const [section, setSection] = useState<AppSection>('home');
@@ -182,6 +184,8 @@ export const AppShell: React.FC = () => {
   });
 
   const p = settings.personalization;
+  const uiTheme = normalizeUiThemeId(p.uiTheme);
+  const activePalette = resolveActivePalette(p);
   const customBgUrl = useArtworkUrl(p.backgroundImageId);
   const { palette: trackPalette } = useDominantColor(
     currentTrack?.artworkId,
@@ -218,7 +222,7 @@ export const AppShell: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row relative overflow-x-hidden">
-      {/* Personalized Dynamic Background Layer */}
+      {/* Living Glassmorphic WebGL Shader & Personalized Background Layer */}
       <div
         aria-hidden="true"
         className="pointer-events-none fixed inset-0 -z-10 overflow-hidden transition-all duration-500"
@@ -229,7 +233,7 @@ export const AppShell: React.FC = () => {
               src={customBgUrl}
               alt=""
               className="w-full h-full object-cover scale-105"
-              style={{ filter: p.uiTheme === 'neo' ? `blur(${p.backgroundBlur}px)` : undefined }}
+              style={{ filter: `blur(${p.backgroundBlur}px)` }}
             />
             <div
               className="absolute inset-0 bg-[var(--neo-app-bg)]"
@@ -244,33 +248,51 @@ export const AppShell: React.FC = () => {
                 background: `linear-gradient(${activeGradient.angle}deg, ${activeGradient.from}, ${activeGradient.to})`,
               }}
             />
-            <div
-              className="absolute inset-0 bg-[var(--neo-app-bg)]/80 dark:bg-[var(--neo-app-bg)]/45"
+            <GlassShaderCanvas
+              primaryColor={activeGradient.from}
+              secondaryColor={activeGradient.to}
+              isDark={resolvedTheme === 'dark'}
+              variant={uiTheme}
+              intensity={0.75}
+              paused={settings.reducedMotion}
+              className="absolute inset-0 opacity-45 mix-blend-screen"
             />
+            <div className="absolute inset-0 bg-[var(--neo-app-bg)]/76 dark:bg-[var(--neo-app-bg)]/42" />
           </>
         ) : p.backgroundMode === 'artwork' && currentTrack ? (
-          <div
-            className="w-full h-full transition-all duration-700"
-            style={{
-              background: `
-                radial-gradient(circle at 18% 18%, ${trackPalette.primary}, transparent 58%),
-                radial-gradient(circle at 82% 82%, ${trackPalette.secondary}, transparent 60%)
-              `,
-            }}
+          <GlassShaderCanvas
+            primaryColor={trackPalette.primary}
+            secondaryColor={trackPalette.secondary}
+            isDark={resolvedTheme === 'dark'}
+            variant={uiTheme}
+            intensity={1.15}
+            paused={settings.reducedMotion}
+            className="w-full h-full"
           />
         ) : (
-          <>
-            <div
-              className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full blur-[125px]"
-              style={{ backgroundColor: 'var(--neo-accent-soft)' }}
-            />
-            <div
-              className="absolute bottom-0 right-0 w-[460px] h-[460px] rounded-full blur-[125px]"
-              style={{ backgroundColor: 'var(--neo-secondary-soft)' }}
-            />
-          </>
+          <GlassShaderCanvas
+            primaryColor={activePalette.accent}
+            secondaryColor={activePalette.secondary}
+            isDark={resolvedTheme === 'dark'}
+            variant={uiTheme}
+            intensity={1}
+            paused={settings.reducedMotion}
+            className="w-full h-full"
+          />
         )}
       </div>
+
+      {/* Top & Bottom Viewport Progressive Blur Curtains (disabled on Material 3) */}
+      {uiTheme !== 'material' && (
+        <>
+          <ProgressiveBlur position="top" className="lg:hidden h-14" maxBlurPx={14} />
+          <ProgressiveBlur
+            position="bottom"
+            className={currentTrack ? 'h-32 lg:h-24' : 'h-20 lg:hidden'}
+            maxBlurPx={22}
+          />
+        </>
+      )}
 
       <GlassNavigation
         items={navItems}
@@ -279,12 +301,28 @@ export const AppShell: React.FC = () => {
         headerSlot={
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-[#111216] dark:bg-white text-white dark:text-[#0A0B0F] flex items-center justify-center shadow-sm">
+              <div
+                className={cn(
+                  'w-9 h-9 bg-[#111216] dark:bg-white text-white dark:text-[#0A0B0F] flex items-center justify-center shadow-sm',
+                  uiTheme === 'editorial'
+                    ? 'rounded-xl'
+                    : uiTheme === 'material'
+                      ? 'rounded-full bg-[var(--neo-accent)] text-white dark:bg-[var(--neo-accent)] dark:text-white'
+                      : 'rounded-2xl'
+                )}
+              >
                 <Disc3 className="w-5 h-5" />
               </div>
-              <span className="text-lg font-bold tracking-tight font-display whitespace-nowrap">
-                Neo Player
-              </span>
+              <div className="leading-tight">
+                <span
+                  className={cn(
+                    'text-lg font-bold tracking-tight font-display whitespace-nowrap block',
+                    uiTheme === 'editorial' && 'italic'
+                  )}
+                >
+                  Neo Player
+                </span>
+              </div>
             </div>
             <button
               type="button"
@@ -319,10 +357,24 @@ export const AppShell: React.FC = () => {
         {/* Mobile Compact Brand & Quick Actions Bar */}
         <header className="lg:hidden flex items-center justify-between gap-3 mb-5">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-[#111216] dark:bg-white text-white dark:text-[#0A0B0F] flex items-center justify-center">
+            <div
+              className={cn(
+                'w-8 h-8 bg-[#111216] dark:bg-white text-white dark:text-[#0A0B0F] flex items-center justify-center',
+                uiTheme === 'editorial'
+                  ? 'rounded-lg'
+                  : uiTheme === 'material'
+                    ? 'rounded-full bg-[var(--neo-accent)] text-white dark:bg-[var(--neo-accent)] dark:text-white'
+                    : 'rounded-xl'
+              )}
+            >
               <Disc3 className="w-4 h-4" />
             </div>
-            <span className="text-base font-bold tracking-tight font-display whitespace-nowrap">
+            <span
+              className={cn(
+                'text-base font-bold tracking-tight font-display whitespace-nowrap',
+                uiTheme === 'editorial' && 'italic'
+              )}
+            >
               Neo Player
             </span>
           </div>

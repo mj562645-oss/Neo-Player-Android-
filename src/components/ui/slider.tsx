@@ -7,8 +7,9 @@ export const Slider = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root> & {
     trackClassName?: string;
     rangeClassName?: string;
+    thumbClassName?: string;
   }
->(({ className, trackClassName, rangeClassName, ...props }, ref) => (
+>(({ className, trackClassName, rangeClassName, thumbClassName, ...props }, ref) => (
   <SliderPrimitive.Root
     ref={ref}
     className={cn(
@@ -30,7 +31,12 @@ export const Slider = React.forwardRef<
         )}
       />
     </SliderPrimitive.Track>
-    <SliderPrimitive.Thumb className="block h-3.5 w-3.5 rounded-full bg-white shadow-md ring-1 ring-black/15 transition-transform duration-150 group-hover:scale-115 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neo-accent)]" />
+    <SliderPrimitive.Thumb
+      className={cn(
+        'block h-3.5 w-3.5 rounded-full bg-white shadow-md ring-1 ring-black/15 transition-transform duration-150 group-hover:scale-115 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neo-accent)]',
+        thumbClassName
+      )}
+    />
   </SliderPrimitive.Root>
 ));
 Slider.displayName = SliderPrimitive.Root.displayName;

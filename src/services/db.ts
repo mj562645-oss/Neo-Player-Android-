@@ -404,7 +404,19 @@ class NeoDatabase {
     const migratedPaletteId =
       rawUiTheme === 'ios' || (storedPaletteId && storedPaletteId.startsWith('ios_'))
         ? DEFAULT_PERSONALIZATION.activePaletteId
-        : storedPaletteId || DEFAULT_PERSONALIZATION.activePaletteId;
+        : storedPaletteId === 'win_fluent_blue'
+          ? 'editorial_lapis'
+          : storedPaletteId === 'win_seafoam'
+            ? 'editorial_champagne'
+            : storedPaletteId === 'win_coral'
+              ? 'editorial_vermilion'
+              : storedPaletteId === 'win_orchid'
+                ? 'editorial_rose'
+                : storedPaletteId === 'win_forest'
+                  ? 'editorial_pine'
+                  : storedPaletteId === 'win_graphite'
+                    ? 'editorial_monolith'
+                    : storedPaletteId || DEFAULT_PERSONALIZATION.activePaletteId;
 
     return {
       ...DEFAULT_USER_SETTINGS,
